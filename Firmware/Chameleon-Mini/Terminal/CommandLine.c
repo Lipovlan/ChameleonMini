@@ -350,6 +350,13 @@ const PROGMEM CommandEntryType CommandTable[] = {
 #include "../Application/DESFire/DESFireChameleonTerminalInclude.c"
 #endif
     {
+    .Command    = COMMAND_LADA,
+    .ExecFunc   = NO_FUNCTION,
+    .ExecParamFunc = NO_FUNCTION,
+    .SetFunc    = NO_FUNCTION,
+    .GetFunc    = CommandGetLada
+    },
+    {
         /* This has to be last element */
         .Command    = COMMAND_LIST_END,
         .ExecFunc   = NO_FUNCTION,

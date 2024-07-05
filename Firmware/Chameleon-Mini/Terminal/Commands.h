@@ -200,6 +200,9 @@ CommandStatusIdType CommandGetAutoThreshold(char *OutParam);
 CommandStatusIdType CommandSetAutoThreshold(char *OutMessage, const char *InParam);
 #endif /*#ifdef CONFIG_ISO15693_SNIFF_SUPPORT*/
 
+#define COMMAND_LADA "LADA"
+CommandStatusIdType CommandGetLada(char *OutParam);
+
 #ifdef ENABLE_RUNTESTS_TERMINAL_COMMAND
 #include "../Tests/ChameleonTerminal.h"
 #endif

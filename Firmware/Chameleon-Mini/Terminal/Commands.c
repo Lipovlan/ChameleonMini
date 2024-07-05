@@ -642,6 +642,10 @@ CommandStatusIdType CommandGetField(char *OutMessage) {
     return COMMAND_INFO_OK_WITH_TEXT_ID;
 }
 
+CommandStatusIdType CommandGetLada(char *OutMessage) {
+    snprintf_P(OutMessage, TERMINAL_BUFFER_SIZE, PSTR("Lada was here"));
+    return COMMAND_INFO_OK_WITH_TEXT_ID;
+}
 
 CommandStatusIdType CommandExecAutocalibrate(char *OutMessage) {
 #ifdef CONFIG_ISO14443A_READER_SUPPORT
