@@ -351,7 +351,7 @@ const PROGMEM CommandEntryType CommandTable[] = {
 #endif
     {
     .Command    = COMMAND_LADA,
-    .ExecFunc   = NO_FUNCTION,
+    .ExecFunc   = CommandExecLada,
     .ExecParamFunc = NO_FUNCTION,
     .SetFunc    = NO_FUNCTION,
     .GetFunc    = CommandGetLada

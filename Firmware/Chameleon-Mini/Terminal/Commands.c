@@ -647,6 +647,12 @@ CommandStatusIdType CommandGetLada(char *OutMessage) {
     return COMMAND_INFO_OK_WITH_TEXT_ID;
 }
 
+CommandStatusIdType CommandExecLada(char *OutMessage) {
+    LEDHook(LED_POWERED, LED_BLINK);
+    snprintf_P(OutMessage, TERMINAL_BUFFER_SIZE, PSTR("Exec LADA was run"));
+    return COMMAND_INFO_OK_WITH_TEXT_ID;
+}
+
 CommandStatusIdType CommandExecAutocalibrate(char *OutMessage) {
 #ifdef CONFIG_ISO14443A_READER_SUPPORT
     if (GlobalSettings.ActiveSettingPtr->Configuration == CONFIG_ISO14443A_READER) {

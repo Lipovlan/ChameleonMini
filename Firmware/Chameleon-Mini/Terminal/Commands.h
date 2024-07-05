@@ -202,6 +202,7 @@ CommandStatusIdType CommandSetAutoThreshold(char *OutMessage, const char *InPara
 
 #define COMMAND_LADA "LADA"
 CommandStatusIdType CommandGetLada(char *OutParam);
+CommandStatusIdType CommandExecLada(char *OutParam);
 
 #ifdef ENABLE_RUNTESTS_TERMINAL_COMMAND
 #include "../Tests/ChameleonTerminal.h"
