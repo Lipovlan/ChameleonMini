@@ -648,7 +648,7 @@ CommandStatusIdType CommandGetLada(char *OutMessage) {
 }
 
 CommandStatusIdType CommandExecLada(char *OutMessage) {
-    LEDHook(LED_POWERED, LED_BLINK);
+    LEDHook(LED_SETTING_CHANGE, LED_BLINK);
     snprintf_P(OutMessage, TERMINAL_BUFFER_SIZE, PSTR("Exec LADA was run"));
     return COMMAND_INFO_OK_WITH_TEXT_ID;
 }
