@@ -20,6 +20,9 @@
 /* Map IDs to text */
 static const MapEntryType PROGMEM ConfigurationMap[] = {
     { .Id = CONFIG_NONE, 			        .Text = "NONE" },
+#ifdef CONFIG_LEGIC_SUPPORT
+    { .Id = CONFIG_LEGIC, 	             .Text = "LEGIC" },
+#endif
 #ifdef CONFIG_MF_ULTRALIGHT_SUPPORT
     { .Id = CONFIG_MF_ULTRALIGHT, 	             .Text = "MF_ULTRALIGHT" },
     { .Id = CONFIG_MF_ULTRALIGHT_EV1_80B,       .Text = "MF_ULTRALIGHT_EV1_80B" },
@@ -109,6 +112,25 @@ static const PROGMEM ConfigurationType ConfigurationTable[] = {
         .ReadOnly = true,
         .TagFamily = TAG_FAMILY_NONE
     },
+#ifdef CONFIG_LEGIC_SUPPORT
+    [CONFIG_LEGIC] = {
+        .CodecInitFunc = ISO14443FCodecInit,
+        .CodecDeInitFunc = ISO14443FCodecDeInit,
+        .CodecTaskFunc = ISO14443FCodecTask,
+        .ApplicationInitFunc = ApplicationInitDummy,
+        .ApplicationInitRunOnceFunc = ApplicationInitDummy,
+        .ApplicationResetFunc = ApplicationResetDummy,
+        .ApplicationTaskFunc = ApplicationTaskDummy,
+        .ApplicationTickFunc = ApplicationTickDummy,
+        .ApplicationProcessFunc = ApplicationProcessDummy,
+        .ApplicationGetUidFunc = ApplicationGetUidDummy,
+        .ApplicationSetUidFunc = ApplicationSetUidDummy,
+        .UidSize = MIFARE_ULTRALIGHT_UID_SIZE,
+        .MemorySize = MIFARE_ULTRALIGHT_MEM_SIZE,
+        .ReadOnly = false,
+        .TagFamily = TAG_FAMILY_ISO14443F
+    },
+#endif
 #ifdef CONFIG_MF_ULTRALIGHT_SUPPORT
     [CONFIG_MF_ULTRALIGHT] = {
         .CodecInitFunc = ISO14443ACodecInit,

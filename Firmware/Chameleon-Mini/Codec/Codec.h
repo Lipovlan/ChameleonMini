@@ -79,6 +79,7 @@
 #include "../Settings.h"
 
 #include "ISO14443-2A.h"
+#include "ISO14443-F.h"
 #include "Reader14443-2A.h"
 #include "SniffISO14443-2A.h"
 #include "ISO15693.h"

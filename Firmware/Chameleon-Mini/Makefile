@@ -14,6 +14,7 @@ SETTINGS        ?=
 ## :          custom build targets found in the BuildScripts/* directory
 #CONFIG_SETTINGS  += -DCONFIG_MF_CLASSIC_MINI_4B_SUPPORT
 CONFIG_SETTINGS  += -DCONFIG_MF_CLASSIC_1K_SUPPORT
+CONFIG_SETTINGS  += -DCONFIG_LEGIC_SUPPORT
 #CONFIG_SETTINGS += -DCONFIG_MF_CLASSIC_1K_7B_SUPPORT
 #CONFIG_SETTINGS += -DCONFIG_MF_CLASSIC_4K_SUPPORT
 #CONFIG_SETTINGS += -DCONFIG_MF_CLASSIC_4K_7B_SUPPORT
@@ -206,6 +207,7 @@ SRC         +=  Terminal/Terminal.c \
 		Terminal/CommandLine.c
 SRC         +=  Codec/Codec.c \
 		Codec/ISO14443-2A.c \
+		Codec/ISO14443-F.c \
 		Codec/Reader14443-2A.c \
 		Codec/SniffISO14443-2A.c \
 		Codec/Reader14443-ISR.S \
