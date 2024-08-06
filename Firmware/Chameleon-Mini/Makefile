@@ -68,8 +68,8 @@ SETTINGS	+= -DDEFAULT_GREEN_LED_ACTION=LED_POWERED
 SETTINGS	+= -DLED_SETTING_GLOBAL
 
 ## : Default logging mode
-SETTINGS	+= -DDEFAULT_LOG_MODE=LOG_MODE_OFF
-#SETTINGS	+= -DDEFAULT_LOG_MODE=LOG_MODE_MEMORY
+#SETTINGS	+= -DDEFAULT_LOG_MODE=LOG_MODE_OFF
+SETTINGS	+= -DDEFAULT_LOG_MODE=LOG_MODE_MEMORY
 #SETTINGS	+= -DDEFAULT_LOG_MODE=LOG_MODE_LIVE
 
 ## : Define if log settings should be global
@@ -215,6 +215,7 @@ SRC         +=  Codec/Codec.c \
 		Codec/SniffISO15693.c
 SRC         +=  Application/MifareUltralight.c \
 		Application/MifareClassic.c \
+		Application/Legic.c \
 		Application/ISO14443-3A.c \
 		Application/Crypto1.c \
 		Application/Reader14443A.c \

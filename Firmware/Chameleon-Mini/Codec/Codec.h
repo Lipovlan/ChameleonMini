@@ -93,6 +93,9 @@
 #define ISO14443A_FRAME_DELAY_PREV0     1172
 #define ISO14443A_RX_PENDING_TIMEOUT	4 // ms
 
+/* Timing definitions for ISO14443F */
+#define ISO14443F_SUBCARRIER_DIVIDER    64
+
 #define CODEC_BUFFER_SIZE           256
 
 #define CODEC_CARRIER_FREQ          13560000
