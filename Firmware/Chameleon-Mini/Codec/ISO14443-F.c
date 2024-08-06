@@ -82,11 +82,11 @@ static void StartDemod(void) {
 // ============================== end ISO14443-2A.c
 
 //TODO: Clean this up
-char legic_log_str[64];
+char iso14443F_log_str[64];
 
 void ISO14443FCodecInit(void) {
-    sprintf(legic_log_str, "ISO14443-F Initialized");
-    LogEntry(LOG_INFO_GENERIC, legic_log_str, strlen(legic_log_str));
+    sprintf(iso14443F_log_str, "ISO14443-F Initialized");
+    LogEntry(LOG_INFO_GENERIC, iso14443F_log_str, strlen(iso14443F_log_str));
 
     // ============================== From ISO14443-2A.c
     /* Initialize some global vars and start looking out for reader commands */
@@ -104,8 +104,8 @@ void ISO14443FCodecInit(void) {
 }
 
 void ISO14443FCodecDeInit(void) {
-    sprintf(legic_log_str, "ISO14443-F Deinitialized");
-    LogEntry(LOG_INFO_GENERIC, legic_log_str, strlen(legic_log_str));
+    sprintf(iso14443F_log_str, "ISO14443-F Deinitialized");
+    LogEntry(LOG_INFO_GENERIC, iso14443F_log_str, strlen(iso14443F_log_str));
 
     // ============================== From ISO14443-2A.c
     /* Gracefully shutdown codec */
@@ -133,7 +133,9 @@ void ISO14443FCodecDeInit(void) {
 
 }
 
-void ISO14443FCodecTask(void) {
+void ISO14443FCodecTask(void){
+//    sprintf(iso14443F_log_str, "ISO14443-F Codec Task run");
+//    LogEntry(LOG_INFO_GENERIC, iso14443F_log_str, strlen(iso14443F_log_str));
     // ============================== From ISO14443-2A.c
     if (Flags.DemodFinished) {
         Flags.DemodFinished = 0;
@@ -166,7 +168,7 @@ void ISO14443FCodecTask(void) {
 
             BitCount = AnswerBitCount;
             CodecBufferPtr = CodecBuffer;
-            CodecSetSubcarrier(CODEC_SUBCARRIERMOD_OOK, ISO14443A_SUBCARRIER_DIVIDER);
+            CodecSetSubcarrier(CODEC_SUBCARRIERMOD_OOK, ISO14443F_SUBCARRIER_DIVIDER);
 
             StateRegister = LOADMOD_START;
         } else {
