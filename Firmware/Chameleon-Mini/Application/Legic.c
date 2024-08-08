@@ -15,7 +15,6 @@ char legic_log_str[64];
 #include "Crypto1.h"
 #include "../Random.h"
 
-
 #define MFCLASSIC_MINI_4B_ATQA_VALUE    0x0004
 #define MFCLASSIC_1K_ATQA_VALUE         0x0004
 #define MFCLASSIC_1K_7B_ATQA_VALUE      0x0044
@@ -82,6 +81,184 @@ char legic_log_str[64];
 #define CMD_CHINESE_WIPE            0x41
 #define CMD_CHINESE_UNLOCK_RW       0x43
 
+
+
+
+/*
+Source: NXP: MF1S50YYX Product data sheet
+
+Access conditions for the sector trailer
+
+Access bits     Access condition for                   Remark
+            KEYA         Access bits  KEYB
+C1 C2 C3        read  write  read  write  read  write
+0  0  0         never key A  key A never  key A key A  Key B may be read[1]
+0  1  0         never never  key A never  key A never  Key B may be read[1]
+1  0  0         never key B  keyA|B never never key B
+1  1  0         never never  keyA|B never never never
+0  0  1         never key A  key A  key A key A key A  Key B may be read,
+                                                       transport configuration[1]
+0  1  1         never key B  keyA|B key B never key B
+1  0  1         never never  keyA|B key B never never
+1  1  1         never never  keyA|B never never never
+
+[1] For this access condition key B is readable and may be used for data
+*/
+#define ACC_TRAILOR_READ_KEYA   0x01
+#define ACC_TRAILOR_WRITE_KEYA  0x02
+#define ACC_TRAILOR_READ_ACC    0x04
+#define ACC_TRAILOR_WRITE_ACC   0x08
+#define ACC_TRAILOR_READ_KEYB   0x10
+#define ACC_TRAILOR_WRITE_KEYB  0x20
+
+
+
+/*
+Access conditions for data blocks
+Access bits Access condition for                 Application
+C1 C2 C3     read     write     increment     decrement,
+                                                transfer,
+                                                restore
+
+0 0 0         key A|B key A|B key A|B     key A|B     transport configuration
+0 1 0         key A|B never     never         never         read/write block
+1 0 0         key A|B key B     never         never         read/write block
+1 1 0         key A|B key B     key B         key A|B     value block
+0 0 1         key A|B never     never         key A|B     value block
+0 1 1         key B     key B     never         never         read/write block
+1 0 1         key B     never     never         never         read/write block
+1 1 1         never     never     never         never         read/write block
+
+*/
+#define ACC_BLOCK_READ      0x01
+#define ACC_BLOCK_WRITE     0x02
+#define ACC_BLOCK_INCREMENT 0x04
+#define ACC_BLOCK_DECREMENT 0x08
+
+#define KEY_A 0
+#define KEY_B 1
+
+/* Decoding table for Access conditions of a data block */
+static const uint8_t abBlockAccessConditions[8][2] = {
+    /*C1C2C3 */
+    /* 0 0 0 R:key A|B W: key A|B I:key A|B D:key A|B     transport configuration */
+    {
+        /* Access with Key A */
+        ACC_BLOCK_READ | ACC_BLOCK_WRITE | ACC_BLOCK_INCREMENT | ACC_BLOCK_DECREMENT,
+        /* Access with Key B */
+        ACC_BLOCK_READ | ACC_BLOCK_WRITE | ACC_BLOCK_INCREMENT | ACC_BLOCK_DECREMENT
+    },
+    /* 1 0 0 R:key A|B W:key B I:never D:never     read/write block */
+    {
+        /* Access with Key A */
+        ACC_BLOCK_READ,
+        /* Access with Key B */
+        ACC_BLOCK_READ | ACC_BLOCK_WRITE
+    },
+    /* 0 1 0 R:key A|B W:never I:never D:never     read/write block */
+    {
+        /* Access with Key A */
+        ACC_BLOCK_READ,
+        /* Access with Key B */
+        ACC_BLOCK_READ
+    },
+    /* 1 1 0 R:key A|B W:key B I:key B D:key A|B     value block */
+    {
+        /* Access with Key A */
+        ACC_BLOCK_READ  |  ACC_BLOCK_DECREMENT,
+        /* Access with Key B */
+        ACC_BLOCK_READ | ACC_BLOCK_WRITE | ACC_BLOCK_INCREMENT | ACC_BLOCK_DECREMENT
+    },
+    /* 0 0 1 R:key A|B W:never I:never D:key A|B     value block */
+    {
+        /* Access with Key A */
+        ACC_BLOCK_READ  |  ACC_BLOCK_DECREMENT,
+        /* Access with Key B */
+        ACC_BLOCK_READ  |  ACC_BLOCK_DECREMENT
+    },
+    /* 1 0 1 R:key B W:never I:never D:never     read/write block */
+    {
+        /* Access with Key A */
+        0,
+        /* Access with Key B */
+        ACC_BLOCK_READ
+    },
+    /* 0 1 1 R:key B W:key B I:never D:never    read/write block */
+    {
+        /* Access with Key A */
+        0,
+        /* Access with Key B */
+        ACC_BLOCK_READ | ACC_BLOCK_WRITE
+    },
+    /* 1 1 1 R:never W:never I:never D:never    read/write block */
+    {
+        /* Access with Key A */
+        0,
+        /* Access with Key B */
+        0
+    }
+
+};
+/* Decoding table for Access conditions of the sector trailor */
+static const uint8_t abTrailorAccessConditions[8][2] = {
+    /* 0  0  0 RdKA:never WrKA:key A  RdAcc:key A WrAcc:never  RdKB:key A WrKB:key A      Key B may be read[1] */
+    {
+        /* Access with Key A */
+        ACC_TRAILOR_WRITE_KEYA | ACC_TRAILOR_READ_ACC | ACC_TRAILOR_WRITE_ACC | ACC_TRAILOR_READ_KEYB | ACC_TRAILOR_WRITE_KEYB,
+        /* Access with Key B */
+        0
+    },
+    /* 1  0  0 RdKA:never WrKA:key B  RdAcc:keyA|B WrAcc:never RdKB:never WrKB:key B */
+    {
+        /* Access with Key A */
+        ACC_TRAILOR_READ_ACC,
+        /* Access with Key B */
+        ACC_TRAILOR_WRITE_KEYA | ACC_TRAILOR_READ_ACC |  ACC_TRAILOR_WRITE_KEYB
+    },
+    /* 0  1  0 RdKA:never WrKA:never  RdAcc:key A WrAcc:never  RdKB:key A WrKB:never  Key B may be read[1] */
+    {
+        /* Access with Key A */
+        ACC_TRAILOR_READ_ACC | ACC_TRAILOR_READ_KEYB,
+        /* Access with Key B */
+        0
+    },
+    /* 1  1  0         never never  keyA|B never never never */
+    {
+        /* Access with Key A */
+        ACC_TRAILOR_READ_ACC,
+        /* Access with Key B */
+        ACC_TRAILOR_READ_ACC
+    },
+    /* 0  0  1         never key A  key A  key A key A key A  Key B may be read,transport configuration[1] */
+    {
+        /* Access with Key A */
+        ACC_TRAILOR_WRITE_KEYA | ACC_TRAILOR_READ_ACC | ACC_TRAILOR_WRITE_ACC | ACC_TRAILOR_READ_KEYB | ACC_TRAILOR_WRITE_KEYB,
+        /* Access with Key B */
+        0
+    },
+    /* 0  1  1         never key B  keyA|B key B never key B */
+    {
+        /* Access with Key A */
+        ACC_TRAILOR_READ_ACC,
+        /* Access with Key B */
+        ACC_TRAILOR_WRITE_KEYA | ACC_TRAILOR_READ_ACC | ACC_TRAILOR_WRITE_ACC | ACC_TRAILOR_WRITE_KEYB
+    },
+    /* 1  0  1         never never  keyA|B key B never never */
+    {
+        /* Access with Key A */
+        ACC_TRAILOR_READ_ACC,
+        /* Access with Key B */
+        ACC_TRAILOR_READ_ACC | ACC_TRAILOR_WRITE_ACC
+    },
+    /* 1  1  1         never never  keyA|B never never never */
+    {
+        /* Access with Key A */
+        ACC_TRAILOR_READ_ACC,
+        /* Access with Key B */
+        ACC_TRAILOR_READ_ACC
+    },
+};
+
 static enum {
     STATE_HALT,
     STATE_IDLE,
@@ -126,8 +303,8 @@ INLINE uint8_t GetAccessCondition(uint8_t Block) {
 
     /* Check */
     if (((InvSAcc0 ^ Acc1) & 0xf0) ||    /* C1x */
-        ((InvSAcc0 ^ Acc2) & 0x0f) ||   /* C2x */
-        ((InvSAcc1 ^ Acc2) & 0xf0)) {   /* C3x */
+            ((InvSAcc0 ^ Acc2) & 0x0f) ||   /* C2x */
+            ((InvSAcc1 ^ Acc2) & 0xf0)) {   /* C3x */
         return (NO_ACCESS);
     }
     /* Fix for MFClassic 4K cards */
@@ -161,103 +338,16 @@ INLINE uint8_t GetAccessCondition(uint8_t Block) {
     return (ResultForBlock);
 }
 
-/*
-Source: NXP: MF1S50YYX Product data sheet
-
-Access conditions for the sector trailer
-
-Access bits     Access condition for                   Remark
-            KEYA         Access bits  KEYB
-C1 C2 C3        read  write  read  write  read  write
-0  0  0         never key A  key A never  key A key A  Key B may be read[1]
-0  1  0         never never  key A never  key A never  Key B may be read[1]
-1  0  0         never key B  keyA|B never never key B
-1  1  0         never never  keyA|B never never never
-0  0  1         never key A  key A  key A key A key A  Key B may be read,
-                                                       transport configuration[1]
-0  1  1         never key B  keyA|B key B never key B
-1  0  1         never never  keyA|B key B never never
-1  1  1         never never  keyA|B never never never
-
-[1] For this access condition key B is readable and may be used for data
-*/
-#define ACC_TRAILOR_READ_KEYA   0x01
-#define ACC_TRAILOR_WRITE_KEYA  0x02
-#define ACC_TRAILOR_READ_ACC    0x04
-#define ACC_TRAILOR_WRITE_ACC   0x08
-#define ACC_TRAILOR_READ_KEYB   0x10
-#define ACC_TRAILOR_WRITE_KEYB  0x20
-
-/* Decoding table for Access conditions of the sector trailor */
-static const uint8_t abTrailorAccessConditions[8][2] = {
-        /* 0  0  0 RdKA:never WrKA:key A  RdAcc:key A WrAcc:never  RdKB:key A WrKB:key A      Key B may be read[1] */
-        {
-                /* Access with Key A */
-                ACC_TRAILOR_WRITE_KEYA | ACC_TRAILOR_READ_ACC | ACC_TRAILOR_WRITE_ACC | ACC_TRAILOR_READ_KEYB | ACC_TRAILOR_WRITE_KEYB,
-                /* Access with Key B */
-                0
-        },
-        /* 1  0  0 RdKA:never WrKA:key B  RdAcc:keyA|B WrAcc:never RdKB:never WrKB:key B */
-        {
-                /* Access with Key A */
-                ACC_TRAILOR_READ_ACC,
-                /* Access with Key B */
-                ACC_TRAILOR_WRITE_KEYA | ACC_TRAILOR_READ_ACC |  ACC_TRAILOR_WRITE_KEYB
-        },
-        /* 0  1  0 RdKA:never WrKA:never  RdAcc:key A WrAcc:never  RdKB:key A WrKB:never  Key B may be read[1] */
-        {
-                /* Access with Key A */
-                ACC_TRAILOR_READ_ACC | ACC_TRAILOR_READ_KEYB,
-                /* Access with Key B */
-                0
-        },
-        /* 1  1  0         never never  keyA|B never never never */
-        {
-                /* Access with Key A */
-                ACC_TRAILOR_READ_ACC,
-                /* Access with Key B */
-                ACC_TRAILOR_READ_ACC
-        },
-        /* 0  0  1         never key A  key A  key A key A key A  Key B may be read,transport configuration[1] */
-        {
-                /* Access with Key A */
-                ACC_TRAILOR_WRITE_KEYA | ACC_TRAILOR_READ_ACC | ACC_TRAILOR_WRITE_ACC | ACC_TRAILOR_READ_KEYB | ACC_TRAILOR_WRITE_KEYB,
-                /* Access with Key B */
-                0
-        },
-        /* 0  1  1         never key B  keyA|B key B never key B */
-        {
-                /* Access with Key A */
-                ACC_TRAILOR_READ_ACC,
-                /* Access with Key B */
-                ACC_TRAILOR_WRITE_KEYA | ACC_TRAILOR_READ_ACC | ACC_TRAILOR_WRITE_ACC | ACC_TRAILOR_WRITE_KEYB
-        },
-        /* 1  0  1         never never  keyA|B key B never never */
-        {
-                /* Access with Key A */
-                ACC_TRAILOR_READ_ACC,
-                /* Access with Key B */
-                ACC_TRAILOR_READ_ACC | ACC_TRAILOR_WRITE_ACC
-        },
-        /* 1  1  1         never never  keyA|B never never never */
-        {
-                /* Access with Key A */
-                ACC_TRAILOR_READ_ACC,
-                /* Access with Key B */
-                ACC_TRAILOR_READ_ACC
-        },
-};
-
 INLINE bool CheckValueIntegrity(uint8_t *Block) {
     /* Value Blocks contain a value stored three times, with
      * the middle portion inverted. */
     if ((Block[0] == (uint8_t) ~Block[4]) && (Block[0] == Block[8])
-        && (Block[1] == (uint8_t) ~Block[5]) && (Block[1] == Block[9])
-        && (Block[2] == (uint8_t) ~Block[6]) && (Block[2] == Block[10])
-        && (Block[3] == (uint8_t) ~Block[7]) && (Block[3] == Block[11])
-        && (Block[12] == (uint8_t) ~Block[13])
-        && (Block[12] == Block[14])
-        && (Block[14] == (uint8_t) ~Block[15])) {
+            && (Block[1] == (uint8_t) ~Block[5]) && (Block[1] == Block[9])
+            && (Block[2] == (uint8_t) ~Block[6]) && (Block[2] == Block[10])
+            && (Block[3] == (uint8_t) ~Block[7]) && (Block[3] == Block[11])
+            && (Block[12] == (uint8_t) ~Block[13])
+            && (Block[12] == Block[14])
+            && (Block[14] == (uint8_t) ~Block[15])) {
         return true;
     } else {
         return false;
@@ -957,9 +1047,6 @@ void LegicAppInit(void) {
 }
 
 void LegicAppReset(void) {
-    sprintf(legic_log_str, "LEGIC APP RESET");
-    LogEntry(LOG_INFO_GENERIC, legic_log_str, strlen(legic_log_str));
-
     State = STATE_IDLE;
 }
 
