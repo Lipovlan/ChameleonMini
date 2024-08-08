@@ -10,7 +10,7 @@ char legic_log_str[64];
 // ============================== From MifareClassic.c
 
 #include "ISO14443-3A.h"
-#include "../Codec/ISO14443-2A.h"
+#include "../Codec/ISO14443-F.h"
 #include "../Memory.h"
 #include "Crypto1.h"
 #include "../Random.h"
