@@ -114,21 +114,21 @@ static const PROGMEM ConfigurationType ConfigurationTable[] = {
     },
 #ifdef CONFIG_LEGIC_SUPPORT
     [CONFIG_LEGIC] = {
-        .CodecInitFunc = ISO14443FCodecInit,
-        .CodecDeInitFunc = ISO14443FCodecDeInit,
-        .CodecTaskFunc = ISO14443FCodecTask,
-        .ApplicationInitFunc = LegicAppInit,
-        .ApplicationInitRunOnceFunc = LegicAppInit,
-        .ApplicationResetFunc = LegicAppReset,
-        .ApplicationTaskFunc = LegicAppTask,
-        .ApplicationTickFunc = ApplicationTickDummy,
-        .ApplicationProcessFunc = LegicAppProcess,
-        .ApplicationGetUidFunc = LegicGetUid,
-        .ApplicationSetUidFunc = LegicSetUid,
-        .UidSize = LEGIC_UID_SIZE,
-        .MemorySize = MIFARE_ULTRALIGHT_MEM_SIZE,
-        .ReadOnly = false,
-        .TagFamily = TAG_FAMILY_ISO14443F
+            .CodecInitFunc = ISO14443FCodecInit,
+            .CodecDeInitFunc = ISO14443FCodecDeInit,
+            .CodecTaskFunc = ISO14443FCodecTask,
+            .ApplicationInitFunc = LegicAppInit,
+            .ApplicationInitRunOnceFunc = LegicAppInit,
+            .ApplicationResetFunc = LegicAppReset,
+            .ApplicationTaskFunc = LegicAppTask,
+            .ApplicationTickFunc = ApplicationTickDummy,
+            .ApplicationProcessFunc = LegicAppProcess,
+            .ApplicationGetUidFunc = LegicGetUid,
+            .ApplicationSetUidFunc = LegicSetUid,
+            .UidSize = LEGIC_UID_SIZE,
+            .MemorySize = LEGIC_MEM_SIZE,
+            .ReadOnly = false,
+            .TagFamily = TAG_FAMILY_ISO14443F
     },
 #endif
 #ifdef CONFIG_MF_ULTRALIGHT_SUPPORT
