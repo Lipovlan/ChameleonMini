@@ -114,7 +114,7 @@ ISR_SHARED isr_ISO14443_2A_TCD0_CCC_vect(void) {
 }
 
 // Sampling with timer and demod
-ISR(CODEC_TIMER_SAMPLING_CCA_VECT) {
+ISR_SHARED isr_ISO14443_2A_CODEC_TIMER_SAMPLING_CCA_VECT(void){
     /* This interrupt gets called twice for every bit to sample it. */
     uint8_t SamplePin = CODEC_DEMOD_IN_PORT.IN & CODEC_DEMOD_IN_MASK;
 
@@ -387,6 +387,7 @@ void ISO14443ACodecInit(void) {
     isr_func_TCD0_CCC_vect = &isr_Reader14443_2A_TCD0_CCC_vect;
     isr_func_CODEC_DEMOD_IN_INT0_VECT = &isr_ISO14443_2A_TCD0_CCC_vect;
     isr_func_CODEC_TIMER_LOADMOD_OVF_VECT = &isr_ISO14443_2A_CODEC_TIMER_LOADMOD_OVF_VECT;
+    isr_func_CODEC_TIMER_SAMPLING_CCA_vect = &isr_ISO14443_2A_CODEC_TIMER_SAMPLING_CCA_VECT;
     CodecInitCommon();
     StartDemod();
 }

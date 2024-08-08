@@ -128,6 +128,9 @@ extern enum RCTraffic {TRAFFIC_READER, TRAFFIC_CARD} SniffTrafficSource;
 /* Shared ISR pointers and handlers */
 extern void (* volatile isr_func_TCD0_CCC_vect)(void);
 void isr_Reader14443_2A_TCD0_CCC_vect(void);
+extern void (* volatile isr_func_CODEC_TIMER_SAMPLING_CCA_vect)(void);
+void isr_ISO14443_2A_CODEC_TIMER_SAMPLING_CCA_VECT(void);
+void isr_ISO14443_F_CODEC_TIMER_SAMPLING_CCA_VECT(void);
 void isr_ISO15693_CODEC_TIMER_SAMPLING_CCC_VECT(void);
 extern void (* volatile isr_func_CODEC_DEMOD_IN_INT0_VECT)(void);
 void isr_ISO14443_2A_TCD0_CCC_vect(void);
