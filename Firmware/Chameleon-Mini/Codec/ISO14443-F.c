@@ -369,7 +369,7 @@ ISR_SHARED isr_ISO14443_F_CODEC_TIMER_LOADMOD_OVF_VECT(void) {
      * stop the subcarrier divider. */
     CODEC_TIMER_LOADMOD.CTRLA = TC_CLKSEL_OFF_gc;
     CODEC_TIMER_LOADMOD.INTCTRLA = 0;
-    CodecSetSubcarrier(CODEC_SUBCARRIERMOD_OFF, ISO14443A_SUBCARRIER_DIVIDER);
+    CodecSetSubcarrier(CODEC_SUBCARRIERMOD_OFF, 0);
 
     /* Signal application that we have finished loadmod */
     Flags.LoadmodFinished = 1;
@@ -445,7 +445,7 @@ void ISO14443FCodecTask(void) {
 
             BitCount = AnswerBitCount;
             CodecBufferPtr = CodecBuffer;
-            CodecSetSubcarrier(CODEC_SUBCARRIERMOD_OOK, ISO14443A_SUBCARRIER_DIVIDER);
+            CodecSetSubcarrier(CODEC_SUBCARRIERMOD_OOK, ISO14443F_SUBCARRIER_DIVIDER);
 
             StateRegister = LOADMOD_START;
         } else {

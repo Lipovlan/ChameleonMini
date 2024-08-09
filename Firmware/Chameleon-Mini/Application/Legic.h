@@ -8,7 +8,7 @@
 #include "ISO14443-3A.h"
 
 #define LEGIC_UID_SIZE       ISO14443A_UID_SIZE_SINGLE
-#define LEGIC_MEM_SIZE       1024 // There are two LEGIC prime variants -- 256 and 1024 bytes, so we use the bigger one
+#define LEGIC_MEM_SIZE       256 // There are two LEGIC prime variants -- 256 and 1024 bytes, so we use the small one now
 
 void LegicAppInit(void);
 void LegicAppReset(void);

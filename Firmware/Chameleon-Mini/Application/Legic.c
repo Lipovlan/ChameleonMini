@@ -1014,27 +1014,31 @@ void LegicGetUid(ConfigurationUidType Uid) {
     sprintf(legic_log_str, "LEGIC GET UID");
     LogEntry(LOG_INFO_GENERIC, legic_log_str, strlen(legic_log_str));
 
-    if (ActiveConfiguration.UidSize == 7) {
-        //Uid[0]=0x88;
-        MemoryReadBlock(&Uid[0], MEM_UID_CL1_ADDRESS, MEM_UID_CL1_SIZE - 1);
-        MemoryReadBlock(&Uid[3], MEM_UID_CL2_ADDRESS, MEM_UID_CL2_SIZE);
-    } else
-        MemoryReadBlock(Uid, MEM_UID_CL1_ADDRESS, MEM_UID_CL1_SIZE);
+    Uid[0] = 0xAA;
+    Uid[1] = 0xBB;
+    Uid[2] = 0xCC;
+    Uid[3] = 0xDD;
+//    if (ActiveConfiguration.UidSize == 7) {
+//        //Uid[0]=0x88;
+//        MemoryReadBlock(&Uid[0], MEM_UID_CL1_ADDRESS, MEM_UID_CL1_SIZE - 1);
+//        MemoryReadBlock(&Uid[3], MEM_UID_CL2_ADDRESS, MEM_UID_CL2_SIZE);
+//    } else
+//        MemoryReadBlock(Uid, MEM_UID_CL1_ADDRESS, MEM_UID_CL1_SIZE);
 }
 
 void LegicSetUid(ConfigurationUidType Uid) {
     sprintf(legic_log_str, "LEGIC SET UID");
     LogEntry(LOG_INFO_GENERIC, legic_log_str, strlen(legic_log_str));
 
-    if (ActiveConfiguration.UidSize == 7) {
-        //Uid[0]=0x88;
-        MemoryWriteBlock(Uid, MEM_UID_CL1_ADDRESS, ActiveConfiguration.UidSize);
-    } else {
-        uint8_t BCC =  Uid[0] ^ Uid[1] ^ Uid[2] ^ Uid[3];
-
-        MemoryWriteBlock(Uid, MEM_UID_CL1_ADDRESS, MEM_UID_CL1_SIZE);
-        MemoryWriteBlock(&BCC, MEM_UID_BCC1_ADDRESS, ISO14443A_CL_BCC_SIZE);
-    }
+//    if (ActiveConfiguration.UidSize == 7) {
+//        //Uid[0]=0x88;
+//        MemoryWriteBlock(Uid, MEM_UID_CL1_ADDRESS, ActiveConfiguration.UidSize);
+//    } else {
+//        uint8_t BCC =  Uid[0] ^ Uid[1] ^ Uid[2] ^ Uid[3];
+//
+//        MemoryWriteBlock(Uid, MEM_UID_CL1_ADDRESS, MEM_UID_CL1_SIZE);
+//        MemoryWriteBlock(&BCC, MEM_UID_BCC1_ADDRESS, ISO14443A_CL_BCC_SIZE);
+//    }
 }
 void LegicAppInit(void) {
     sprintf(legic_log_str, "LEGIC APP INIT");
