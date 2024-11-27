@@ -11,6 +11,34 @@
 
 /* Sampling is done using internal clock, synchronized to the field modulation.
  * For that we need to convert the bit rate for the internal clock. */
+// F_CPU = 16 000 000UL = Speed of the CPU, in Hz
+// ISO14443A_BIT_RATE_CYCLES = 128
+// CODEC_CARRIER_FREQ = 13 560 000
+// SAMPLE_RATE_SYSTEM_CYCLES = (16 000 000 * 128) / 13 560 000 = 151.032448378 = 151
+
+// Our Bitrate in cycles is CODEC_CARRIER_FREQ / bitrate
+// But our birate is variable. Received bit 1 takes 80us HIGH and a bit 0 takes 40us HIGH.
+// After both, there needs to be 20us of LOW.
+// So we can effectively say that 1 is composited of 80us of HIGH and 20us LOW which takes 100us in total
+// and 0 is composited of 40us of HIGH and 20us of LOW which takes 60us in total.
+// GCD of 100 and 60 is 20, so we need to measure every 20us to be sure we are synced.
+// Thus, every time we measure LOW, we'll look into our memory and if we encountered
+// 4 HIGHs before, we have just received a 1 or if we read just 3 HIGHs, we have received a 0.
+// So effectively we need to sample each 20 us which makes our bitrate 50 kbps
+// which in turn makes our BIT_RATE_CYCLES 271 (.2 which we )
+//
+//
+// v |
+// o |
+// l |          1                 0                   1                        0
+// t |  +----------------+    +--------+    +--*----*----*----*--+  L  +--*----*----*--+  L
+// a |  |                |    |        |    |  *    *    *    *  |  *  |  *    *    *  |  *
+// g |  |                |    |        |    |  *    *    *    *  |  *  |  *    *    *  |  *
+// e |  |                +----+        +----+  H    H    H    H  +--*--+  H    H    H  +--*--
+//   +-------------------------------------------------------------------------------------------- time
+//
+// a dash takes 10us, stars symbolise a measurement that should be every 20us
+//#define SAMPLE_RATE_SYSTEM_CYCLES		((uint16_t) (((uint64_t) F_CPU * ISO14443A_BIT_RATE_CYCLES) / CODEC_CARRIER_FREQ) )
 #define SAMPLE_RATE_SYSTEM_CYCLES		((uint16_t) (((uint64_t) F_CPU * ISO14443A_BIT_RATE_CYCLES) / CODEC_CARRIER_FREQ) )
 
 #define ISO14443A_MIN_BITS_PER_FRAME		7
