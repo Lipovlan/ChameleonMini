@@ -79,6 +79,8 @@ typedef enum {
 #define ParityBufferPtr	CodecPtrRegister2
 
 static void StartDemod(void) {
+    TerminalSendString("Legic start demod\n");
+
     /* Activate Power for demodulator */
     CodecSetDemodPower(true);
 
@@ -92,7 +94,7 @@ static void StartDemod(void) {
 
     /* Configure sampling-timer free running and sync to first modulation-pause. */
     CODEC_TIMER_SAMPLING.CNT = 0;                               // Reset the timer count
-    CODEC_TIMER_SAMPLING.PER = SAMPLE_RATE_SYSTEM_CYCLES - 1;   // Set Period regisiter
+    CODEC_TIMER_SAMPLING.PER = SAMPLE_RATE_SYSTEM_CYCLES - 1;   // Set Period register
     CODEC_TIMER_SAMPLING.CCA = 0xFFFF; /* CCA Interrupt is not active! */
     CODEC_TIMER_SAMPLING.CTRLA = TC_CLKSEL_DIV1_gc;
     CODEC_TIMER_SAMPLING.CTRLD = TC_EVACT_RESTART_gc | CODEC_TIMER_MODSTART_EVSEL;
@@ -106,6 +108,8 @@ static void StartDemod(void) {
 
 // Find first pause and start sampling
 ISR_SHARED isr_ISO14443_F_TCD0_CCC_vect(void) {
+    TerminalSendString("Legic isr_ISO14443_F_TCD0_CCC_vect\n");
+
     /* This is the first edge of the first modulation-pause after StartDemod.
      * Now we have time to start
      * demodulating beginning from one bit-width after this edge. */
@@ -140,16 +144,20 @@ ISR_SHARED isr_ISO14443_F_TCD0_CCC_vect(void) {
 
 // Sampling with timer and demod
 ISR_SHARED isr_ISO14443_F_CODEC_TIMER_SAMPLING_CCA_VECT(void){
+
     /* This interrupt gets called twice for every bit to sample it. */
     uint8_t SamplePin = CODEC_DEMOD_IN_PORT.IN & CODEC_DEMOD_IN_MASK;
 
     /* Shift sampled bit into sampling register */
+    // Sample pin očekávám z téhle negace, že mi vrací 1 když naměřil LOW a 0 když naměřil HIGH
     SampleRegister = (SampleRegister << 1) | (!SamplePin ? 0x01 : 0x00);
 
     if (SampleIdxRegister) {
         SampleIdxRegister = 0;
+
         /* Analyze the sampling register after 2 samples. */
         if ((SampleRegister & 0x07) == 0x07) {
+
             /* No carrier modulation for 3 sample points. EOC! */
             CODEC_TIMER_SAMPLING.CTRLA = TC_CLKSEL_OFF_gc;
             CODEC_TIMER_SAMPLING.INTFLAGS = TC0_CCAIF_bm;
@@ -189,54 +197,59 @@ ISR_SHARED isr_ISO14443_F_CODEC_TIMER_SAMPLING_CCA_VECT(void){
 
             /* Signal, that we have finished sampling */
             Flags.DemodFinished = 1;
+            char buf[10];
+            int n = sprintf( buf, "%d", BitCount);
+            TerminalSendString(buf);
+
         } else {
-            /* Otherwise, we check the two sample bits from the bit before. */
-            uint8_t BitSample = SampleRegister & 0xC;
-            uint8_t Bit = 0;
-
-            if (BitSample != (0x0 << 2)) {
-                /* We have a valid bit. decode and process it. */
-                if (BitSample & (0x1 << 2)) {
-                    /* 01 sequence or 11 sequence -> This is a zero bit */
-                    Bit = 0;
-                } else {
-                    /* 10 sequence -> This is a one bit */
-                    Bit = 1;
-                }
-
-                if (StateRegister == DEMOD_DATA_BIT) {
-                    /* This is a data bit, so shift it into the data register and
-                     * hold a local copy of it. */
-                    uint8_t NewDataRegister = DataRegister >> 1;
-                    NewDataRegister |= (Bit ? 0x80 : 0x00);
-                    DataRegister = NewDataRegister;
-
-                    /* Update bitcount */
-                    uint16_t NewBitCount = ++BitCount;
-                    if ((NewBitCount & 0x07) == 0) {
-                        /* We have reached a byte boundary! Store the data register. */
-                        /* TODO: Prevent buffer overflow */
-                        *CodecBufferPtr++ = NewDataRegister;
-
-                        /* Store bit for determining FDT at EOC and enable parity
-                         * handling on next bit. */
-                        StateRegister = DEMOD_PARITY_BIT;
-                    }
-
-                } else if (StateRegister == DEMOD_PARITY_BIT) {
-                    /* This is a parity bit. Store it */
-                    *ParityBufferPtr++ = Bit;
-                    StateRegister = DEMOD_DATA_BIT;
-                } else {
-                    /* Should never Happen (TM) */
-                }
-            } else {
-                /* 00 sequence. -> No valid data yet. This also occurs if we just started
-                 * sampling and have sampled less than 2 bits yet. Thus ignore. */
-            }
+//            /* Otherwise, we check the two sample bits from the bit before. */
+//            uint8_t BitSample = SampleRegister & 0xC;
+//            uint8_t Bit = 0;
+//
+//            if (BitSample != (0x0 << 2)) {
+//                /* We have a valid bit. decode and process it. */
+//                if (BitSample & (0x1 << 2)) {
+//                    /* 01 sequence or 11 sequence -> This is a zero bit */
+//                    Bit = 0;
+//                } else {
+//                    /* 10 sequence -> This is a one bit */
+//                    Bit = 1;
+//                }
+//
+//                if (StateRegister == DEMOD_DATA_BIT) {
+//                    /* This is a data bit, so shift it into the data register and
+//                     * hold a local copy of it. */
+//                    uint8_t NewDataRegister = DataRegister >> 1;
+//                    NewDataRegister |= (Bit ? 0x80 : 0x00);
+//                    DataRegister = NewDataRegister;
+//
+//                    /* Update bitcount */
+//                    uint16_t NewBitCount = ++BitCount;
+//                    if ((NewBitCount & 0x07) == 0) {
+//                        /* We have reached a byte boundary! Store the data register. */
+//                        /* TODO: Prevent buffer overflow */
+//                        *CodecBufferPtr++ = NewDataRegister;
+//
+//                        /* Store bit for determining FDT at EOC and enable parity
+//                         * handling on next bit. */
+//                        StateRegister = DEMOD_PARITY_BIT;
+//                    }
+//
+//                } else if (StateRegister == DEMOD_PARITY_BIT) {
+//                    /* This is a parity bit. Store it */
+//                    *ParityBufferPtr++ = Bit;
+//                    StateRegister = DEMOD_DATA_BIT;
+//                } else {
+//                    /* Should never Happen (TM) */
+//                }
+//            } else {
+//                /* 00 sequence. -> No valid data yet. This also occurs if we just started
+//                 * sampling and have sampled less than 2 bits yet. Thus ignore. */
+//            }
         }
     } else {
         /* On odd sample position just sample. */
+        // WHY
         SampleIdxRegister = ~SampleIdxRegister;
     }
 
@@ -249,6 +262,7 @@ ISR_SHARED isr_ISO14443_F_CODEC_TIMER_SAMPLING_CCA_VECT(void){
 
 // Enumulate as a card to send card responds
 ISR_SHARED isr_ISO14443_F_CODEC_TIMER_LOADMOD_OVF_VECT(void) {
+   return;
     /* Bit rate timer. Output a half bit on the output. */
 
     static void *JumpTable[] = {
@@ -285,7 +299,7 @@ ISR_SHARED isr_ISO14443_F_CODEC_TIMER_LOADMOD_OVF_VECT(void) {
     CodecSetLoadmodState(true);
     CodecStartSubcarrier();
 
-    CODEC_TIMER_LOADMOD.PER = ISO14443A_BIT_RATE_CYCLES / 2 - 1;
+    CODEC_TIMER_LOADMOD.PER = ISO14443F_BIT_RATE_CYCLES / 2 - 1;
     StateRegister = LOADMOD_START_BIT1;
     return;
 
@@ -405,6 +419,8 @@ ISR_SHARED isr_ISO14443_F_CODEC_TIMER_LOADMOD_OVF_VECT(void) {
 }
 
 void ISO14443FCodecInit(void) {
+    TerminalSendString("Legic ISO14443FCodecInit\n");
+
     /* Initialize some global vars and start looking out for reader commands */
     Flags.DemodFinished = 0;
     Flags.LoadmodFinished = 0;
@@ -418,6 +434,8 @@ void ISO14443FCodecInit(void) {
 }
 
 void ISO14443FCodecDeInit(void) {
+    TerminalSendString("Legic ISO14443FCodecDeInit\n");
+
     /* Gracefully shutdown codec */
     CODEC_DEMOD_IN_PORT.INT0MASK = 0;
 
@@ -442,7 +460,10 @@ void ISO14443FCodecDeInit(void) {
 }
 
 void ISO14443FCodecTask(void) {
+
     if (Flags.DemodFinished) {
+        TerminalSendString("Legic DemodFinished\n");
+
         Flags.DemodFinished = 0;
         /* Reception finished. Process the received bytes */
         uint16_t DemodBitCount = BitCount;
@@ -486,6 +507,8 @@ void ISO14443FCodecTask(void) {
     }
 
     if (Flags.LoadmodFinished) {
+        TerminalSendString("Legic LoadmodFinished\n");
+
         Flags.LoadmodFinished = 0;
         /* Load modulation has been finished. Stop it and start to listen
          * for incoming data again. */
