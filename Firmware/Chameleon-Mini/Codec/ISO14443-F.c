@@ -11,7 +11,7 @@
 
 /* Sampling is done using internal clock, synchronized to the field modulation.
  * For that we need to convert the bit rate for the internal clock. */
-// F_CPU = 16 000 000UL = Speed of the CPU, in Hz
+// F_CPU = 2 * 13 560 000UL = Speed of the CPU, in Hz
 // ISO14443A_BIT_RATE_CYCLES = 128
 // CODEC_CARRIER_FREQ = 13 560 000
 // SAMPLE_RATE_SYSTEM_CYCLES = (16 000 000 * 128) / 13 560 000 = 151.032448378 = 151
@@ -93,16 +93,28 @@ static void StartDemod(void) {
     StateRegister = DEMOD_DATA_BIT;
 
     /* Configure sampling-timer free running and sync to first modulation-pause. */
-    CODEC_TIMER_SAMPLING.CNT = 0;                               // Reset the timer count
-    CODEC_TIMER_SAMPLING.PER = SAMPLE_RATE_SYSTEM_CYCLES - 1;   // Set Period register
-    CODEC_TIMER_SAMPLING.CCA = 0xFFFF; /* CCA Interrupt is not active! */
-    CODEC_TIMER_SAMPLING.CTRLA = TC_CLKSEL_DIV1_gc;
+    CODEC_TIMER_SAMPLING.CNT = 0; /* Reset the timer count initial value*/
+    CODEC_TIMER_SAMPLING.PER = SAMPLE_RATE_SYSTEM_CYCLES - 1; /* Set Period register to our desired sampling rate*/
+    CODEC_TIMER_SAMPLING.CCA = 0xFFFF; /* Disable CCA interrupt */
+    /* CTRLA has CKSEL stored in its lower half */
+    CODEC_TIMER_SAMPLING.CTRLA = TC_CLKSEL_DIV1_gc;  /* Start the timer with no prescaler on the system clock */
+    /* CTRLD is combination of EVACT, EVDLY and EVSEL
+     * EVACT defines the action that will happen after an event arises on source set by EVSEL
+     * EVDLY sets delay when the counter is used in 32 bit mode instead of normal 16 bit mode that we use
+     * We set EVACT to RESTART and EVSEL to 0x8 which means channel 0
+     * that means listen on Channel 0 for events (in our case TOP event -> CNT == PER) and do action restart */
     CODEC_TIMER_SAMPLING.CTRLD = TC_EVACT_RESTART_gc | CODEC_TIMER_MODSTART_EVSEL;
+    /* TODO: This seems unnecessary, the INTFLAGS register is set on a compare match or on an input capture
+     * event on the corresponding CC channel. Why are we setting it? */
     CODEC_TIMER_SAMPLING.INTFLAGS = TC0_CCAIF_bm;
+    /* Enable the timer compare and capture interrupt for channel CCA with level HIGH (0x3) */
     CODEC_TIMER_SAMPLING.INTCTRLB = TC_CCAINTLVL_HI_gc;
 
     /* Start looking out for modulation pause via interrupt. */
+
+    /* Clear the interrupt flag on the port */
     CODEC_DEMOD_IN_PORT.INTFLAGS = PORT_INT0IF_bm;
+    /* Set pin 1 as source for interrupt 0*/
     CODEC_DEMOD_IN_PORT.INT0MASK = CODEC_DEMOD_IN_MASK0;
 }
 
@@ -198,7 +210,7 @@ ISR_SHARED isr_ISO14443_F_CODEC_TIMER_SAMPLING_CCA_VECT(void){
             /* Signal, that we have finished sampling */
             Flags.DemodFinished = 1;
             char buf[10];
-            int n = sprintf( buf, "%d", BitCount);
+            int n = sprintf( buf, "%d", F_CPU);
             TerminalSendString(buf);
 
         } else {
