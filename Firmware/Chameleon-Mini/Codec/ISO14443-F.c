@@ -12,20 +12,19 @@
 /* Sampling is done using internal clock, synchronized to the field modulation.
  * For that we need to convert the bit rate for the internal clock. */
 // F_CPU = 2 * 13 560 000UL = Speed of the CPU, in Hz
-// ISO14443A_BIT_RATE_CYCLES = 128
 // CODEC_CARRIER_FREQ = 13 560 000
-// SAMPLE_RATE_SYSTEM_CYCLES = (16 000 000 * 128) / 13 560 000 = 151.032448378 = 151
+// SAMPLE_RATE_SYSTEM_CYCLES = (2 * 13 560 000 * ISO14443F_BIT_RATE_CYCLES) / 13 560 000 = 2 * ISO14443F_BIT_RATE_CYCLES
 
-// Our Bitrate in cycles is CODEC_CARRIER_FREQ / bitrate
-// But our birate is variable. Received bit 1 takes 80us HIGH and a bit 0 takes 40us HIGH.
+// Our "Bitrate in cycles" is F_CPU / bitrate
+// But our "bitrate" is variable. Received bit 1 takes 80us HIGH and a bit 0 takes 40us HIGH.
 // After both, there needs to be 20us of LOW.
 // So we can effectively say that 1 is composited of 80us of HIGH and 20us LOW which takes 100us in total
 // and 0 is composited of 40us of HIGH and 20us of LOW which takes 60us in total.
 // GCD of 100 and 60 is 20, so we need to measure every 20us to be sure we are synced.
 // Thus, every time we measure LOW, we'll look into our memory and if we encountered
 // 4 HIGHs before, we have just received a 1 or if we read just 3 HIGHs, we have received a 0.
-// So effectively we need to sample each 20 us which makes our bitrate 50 kbps
-// which in turn makes our BIT_RATE_CYCLES 271 (.2 which we )
+// So effectively we need to sample each 20us which makes our bitrate 50 kbps
+// which in turn makes our BIT_RATE_CYCLES 542 (.4)
 //
 //
 // v |
@@ -38,6 +37,8 @@
 //   +-------------------------------------------------------------------------------------------- time
 //
 // a dash takes 10us, stars symbolise a measurement that should be every 20us
+// we decode HHHHL as 1 and HHHL as 0
+
 //#define SAMPLE_RATE_SYSTEM_CYCLES		((uint16_t) (((uint64_t) F_CPU * ISO14443A_BIT_RATE_CYCLES) / CODEC_CARRIER_FREQ) )
 #define SAMPLE_RATE_SYSTEM_CYCLES		((uint16_t) (((uint64_t) F_CPU * ISO14443F_BIT_RATE_CYCLES) / CODEC_CARRIER_FREQ) )
 
@@ -79,7 +80,7 @@ typedef enum {
 #define ParityBufferPtr	CodecPtrRegister2
 
 static void StartDemod(void) {
-    TerminalSendString("Legic start demod\n");
+    TerminalSendString("Legic start demod\r\n");
 
     /* Activate Power for demodulator */
     CodecSetDemodPower(true);
@@ -120,7 +121,7 @@ static void StartDemod(void) {
 
 // Find first pause and start sampling
 ISR_SHARED isr_ISO14443_F_TCD0_CCC_vect(void) {
-    TerminalSendString("Legic isr_ISO14443_F_TCD0_CCC_vect\n");
+    TerminalSendString("Legic isr_ISO14443_F_TCD0_CCC_vect\r\n");
 
     /* This is the first edge of the first modulation-pause after StartDemod.
      * Now we have time to start
@@ -135,7 +136,7 @@ ISR_SHARED isr_ISO14443_F_TCD0_CCC_vect(void) {
      * We want to sample the demodulated data stream in the first quarter of the half-bit
      * where the pulsed miller encoded is located. */
     CODEC_TIMER_SAMPLING.CTRLD = TC_EVACT_OFF_gc;
-    CODEC_TIMER_SAMPLING.PERBUF = SAMPLE_RATE_SYSTEM_CYCLES / 2 - 1; /* Half bit width */
+    CODEC_TIMER_SAMPLING.PERBUF = SAMPLE_RATE_SYSTEM_CYCLES / 2;
     CODEC_TIMER_SAMPLING.CCABUF = SAMPLE_RATE_SYSTEM_CYCLES / 8 - 14 - 1; /* Compensate for DIGFILT and ISR prolog */
 
     /* Setup Frame Delay Timer and wire to EVSYS. Frame delay time is
@@ -163,6 +164,18 @@ ISR_SHARED isr_ISO14443_F_CODEC_TIMER_SAMPLING_CCA_VECT(void){
     /* Shift sampled bit into sampling register */
     // Sample pin očekávám z téhle negace, že mi vrací 1 když naměřil LOW a 0 když naměřil HIGH
     SampleRegister = (SampleRegister << 1) | (!SamplePin ? 0x01 : 0x00);
+    PORTE.DIRSET |= PIN0_bm;
+    PORTE.OUTSET |= PIN0_bm;
+    char buf[40];
+    if (SamplePin){
+        sprintf(buf, "Sampling 1\r\n");
+    } else if (SampleRegister & 0x00) {
+        sprintf(buf, "Sampling 0\r\n");
+    } else {
+        sprintf(buf, "Sampling fail\r\n");
+    }
+    TerminalSendString(buf);
+
 
     if (SampleIdxRegister) {
         SampleIdxRegister = 0;
@@ -209,9 +222,6 @@ ISR_SHARED isr_ISO14443_F_CODEC_TIMER_SAMPLING_CCA_VECT(void){
 
             /* Signal, that we have finished sampling */
             Flags.DemodFinished = 1;
-            char buf[10];
-            int n = sprintf( buf, "%d", F_CPU);
-            TerminalSendString(buf);
 
         } else {
 //            /* Otherwise, we check the two sample bits from the bit before. */
@@ -264,6 +274,8 @@ ISR_SHARED isr_ISO14443_F_CODEC_TIMER_SAMPLING_CCA_VECT(void){
         // WHY
         SampleIdxRegister = ~SampleIdxRegister;
     }
+
+    PORTE.OUTCLR |= PIN0_bm;
 
     /* Make sure the sampling timer gets automatically aligned to the
      * modulation pauses by using the RESTART event.
@@ -431,7 +443,7 @@ ISR_SHARED isr_ISO14443_F_CODEC_TIMER_LOADMOD_OVF_VECT(void) {
 }
 
 void ISO14443FCodecInit(void) {
-    TerminalSendString("Legic ISO14443FCodecInit\n");
+    TerminalSendString("Legic ISO14443FCodecInit\r\n");
 
     /* Initialize some global vars and start looking out for reader commands */
     Flags.DemodFinished = 0;
@@ -446,7 +458,7 @@ void ISO14443FCodecInit(void) {
 }
 
 void ISO14443FCodecDeInit(void) {
-    TerminalSendString("Legic ISO14443FCodecDeInit\n");
+    TerminalSendString("Legic ISO14443FCodecDeInit\r\n");
 
     /* Gracefully shutdown codec */
     CODEC_DEMOD_IN_PORT.INT0MASK = 0;
@@ -474,7 +486,7 @@ void ISO14443FCodecDeInit(void) {
 void ISO14443FCodecTask(void) {
 
     if (Flags.DemodFinished) {
-        TerminalSendString("Legic DemodFinished\n");
+        TerminalSendString("Legic DemodFinished\r\n");
 
         Flags.DemodFinished = 0;
         /* Reception finished. Process the received bytes */
@@ -519,7 +531,7 @@ void ISO14443FCodecTask(void) {
     }
 
     if (Flags.LoadmodFinished) {
-        TerminalSendString("Legic LoadmodFinished\n");
+        TerminalSendString("Legic LoadmodFinished\r\n");
 
         Flags.LoadmodFinished = 0;
         /* Load modulation has been finished. Stop it and start to listen

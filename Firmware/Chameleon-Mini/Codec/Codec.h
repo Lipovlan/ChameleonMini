@@ -95,7 +95,7 @@
 
 /* Timing definitions for ISO14443F */
 #define ISO14443F_SUBCARRIER_DIVIDER    64
-#define ISO14443F_BIT_RATE_CYCLES       271
+#define ISO14443F_BIT_RATE_CYCLES       542
 
 
 #define CODEC_BUFFER_SIZE           256
