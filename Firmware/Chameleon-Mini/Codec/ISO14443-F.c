@@ -531,6 +531,8 @@ void ISO14443FCodecDeInit(void) {
 void ISO14443FCodecTask(void) {
 
     if (Flags.DemodFinished) {
+        *CodecBufferPtr++ = '\r';
+        *CodecBufferPtr++ = '\n';
         TerminalSendString((char*)CodecBuffer);
         TerminalSendString("Legic DemodFinished\r\n");
 
