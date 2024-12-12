@@ -9,23 +9,31 @@
 #include "Codec.h"
 #include "Log.h"
 
+void set_PE0_high(void){
+    PORTE.DIRSET |= PIN0_bm;
+    PORTE.OUTSET |= PIN0_bm;
+}
+
+void set_PE0_low(void){
+    PORTE.OUTCLR |= PIN0_bm;
+}
+
 /* Sampling is done using internal clock, synchronized to the field modulation.
  * For that we need to convert the bit rate for the internal clock. */
 // F_CPU = 2 * 13 560 000UL = Speed of the CPU, in Hz
-// ISO14443A_BIT_RATE_CYCLES = 128
 // CODEC_CARRIER_FREQ = 13 560 000
-// SAMPLE_RATE_SYSTEM_CYCLES = (16 000 000 * 128) / 13 560 000 = 151.032448378 = 151
+// SAMPLE_RATE_SYSTEM_CYCLES = (2 * 13 560 000 * ISO14443F_BIT_RATE_CYCLES) / 13 560 000 = 2 * ISO14443F_BIT_RATE_CYCLES
 
-// Our Bitrate in cycles is CODEC_CARRIER_FREQ / bitrate
-// But our birate is variable. Received bit 1 takes 80us HIGH and a bit 0 takes 40us HIGH.
+// Our "Bitrate in cycles" is F_CPU / bitrate
+// But our "bitrate" is variable. Received bit 1 takes 80us HIGH and a bit 0 takes 40us HIGH.
 // After both, there needs to be 20us of LOW.
 // So we can effectively say that 1 is composited of 80us of HIGH and 20us LOW which takes 100us in total
 // and 0 is composited of 40us of HIGH and 20us of LOW which takes 60us in total.
 // GCD of 100 and 60 is 20, so we need to measure every 20us to be sure we are synced.
 // Thus, every time we measure LOW, we'll look into our memory and if we encountered
 // 4 HIGHs before, we have just received a 1 or if we read just 3 HIGHs, we have received a 0.
-// So effectively we need to sample each 20 us which makes our bitrate 50 kbps
-// which in turn makes our BIT_RATE_CYCLES 271 (.2 which we )
+// So effectively we need to sample each 20us which makes our bitrate 50 kbps
+// which in turn makes our BIT_RATE_CYCLES 542 (.4)
 //
 //
 // v |
@@ -38,6 +46,8 @@
 //   +-------------------------------------------------------------------------------------------- time
 //
 // a dash takes 10us, stars symbolise a measurement that should be every 20us
+// we decode HHHHL as 1 and HHHL as 0
+
 //#define SAMPLE_RATE_SYSTEM_CYCLES		((uint16_t) (((uint64_t) F_CPU * ISO14443A_BIT_RATE_CYCLES) / CODEC_CARRIER_FREQ) )
 #define SAMPLE_RATE_SYSTEM_CYCLES		((uint16_t) (((uint64_t) F_CPU * ISO14443F_BIT_RATE_CYCLES) / CODEC_CARRIER_FREQ) )
 
@@ -79,7 +89,7 @@ typedef enum {
 #define ParityBufferPtr	CodecPtrRegister2
 
 static void StartDemod(void) {
-    TerminalSendString("Legic start demod\n");
+    TerminalSendString("Legic start demod\r\n");
 
     /* Activate Power for demodulator */
     CodecSetDemodPower(true);
@@ -118,10 +128,8 @@ static void StartDemod(void) {
     CODEC_DEMOD_IN_PORT.INT0MASK = CODEC_DEMOD_IN_MASK0;
 }
 
-// Find first pause and start sampling
+// Přerušení po první pauze modulace
 ISR_SHARED isr_ISO14443_F_TCD0_CCC_vect(void) {
-    TerminalSendString("Legic isr_ISO14443_F_TCD0_CCC_vect\n");
-
     /* This is the first edge of the first modulation-pause after StartDemod.
      * Now we have time to start
      * demodulating beginning from one bit-width after this edge. */
@@ -131,12 +139,13 @@ ISR_SHARED isr_ISO14443_F_TCD0_CCC_vect(void) {
      * an OVF is generated. We want to start sampling with the next bit and use the
      * XYZBUF mechanism of the xmega to automatically double the sampling rate on the
      * next overflow. For this we have to temporarily deactivate the automatical alignment
-     * in order to catch next overflow event for updating the BUF registers.
-     * We want to sample the demodulated data stream in the first quarter of the half-bit
-     * where the pulsed miller encoded is located. */
+     * in order to catch next overflow event for updating the BUF registers.*/
     CODEC_TIMER_SAMPLING.CTRLD = TC_EVACT_OFF_gc;
-    CODEC_TIMER_SAMPLING.PERBUF = SAMPLE_RATE_SYSTEM_CYCLES / 2 - 1; /* Half bit width */
-    CODEC_TIMER_SAMPLING.CCABUF = SAMPLE_RATE_SYSTEM_CYCLES / 8 - 14 - 1; /* Compensate for DIGFILT and ISR prolog */
+    CODEC_TIMER_SAMPLING.PERBUF = SAMPLE_RATE_SYSTEM_CYCLES - 1; /* Perioda samplování v CPU cyklech */
+    /* Počet CPU cyklů po kterých začne samplování. Ty se počítají (nevím) buď
+     * a) hned po sestupné hraně DEMOD pinu
+     * b) jednu periodu po vzestupné hraně DEMOD pinu - spíš asi tohle*/
+    CODEC_TIMER_SAMPLING.CCABUF = SAMPLE_RATE_SYSTEM_CYCLES / 2 ;
 
     /* Setup Frame Delay Timer and wire to EVSYS. Frame delay time is
      * measured from last change in RF field, therefore we use
@@ -156,20 +165,20 @@ ISR_SHARED isr_ISO14443_F_TCD0_CCC_vect(void) {
 
 // Sampling with timer and demod
 ISR_SHARED isr_ISO14443_F_CODEC_TIMER_SAMPLING_CCA_VECT(void){
-
+    SampleIdxRegister++;
     /* This interrupt gets called twice for every bit to sample it. */
     uint8_t SamplePin = CODEC_DEMOD_IN_PORT.IN & CODEC_DEMOD_IN_MASK;
 
     /* Shift sampled bit into sampling register */
     // Sample pin očekávám z téhle negace, že mi vrací 1 když naměřil LOW a 0 když naměřil HIGH
+
     SampleRegister = (SampleRegister << 1) | (!SamplePin ? 0x01 : 0x00);
+    set_PE0_high();
 
-    if (SampleIdxRegister) {
+    if (SampleIdxRegister > 5){
         SampleIdxRegister = 0;
-
-        /* Analyze the sampling register after 2 samples. */
-        if ((SampleRegister & 0x07) == 0x07) {
-
+        Flags.DemodFinished = 1;
+        // No more bits to be read or an error occurred during transmission as 4x HIGH should not happen
             /* No carrier modulation for 3 sample points. EOC! */
             CODEC_TIMER_SAMPLING.CTRLA = TC_CLKSEL_OFF_gc;
             CODEC_TIMER_SAMPLING.INTFLAGS = TC0_CCAIF_bm;
@@ -179,41 +188,87 @@ ISR_SHARED isr_ISO14443_F_CODEC_TIMER_SAMPLING_CCA_VECT(void){
              * let it count the frame delay time in the background, and generate
              * an interrupt once it has reached the FDT. */
             CODEC_TIMER_LOADMOD.CTRLD = TC_EVACT_OFF_gc;
-
-            if (SampleRegister & 0x08) {
-                CODEC_TIMER_LOADMOD.PER = ISO14443A_FRAME_DELAY_PREV1 - 40; /* compensate for ISR prolog */
-            } else {
-                CODEC_TIMER_LOADMOD.PER = ISO14443A_FRAME_DELAY_PREV0 - 40; /* compensate for ISR prolog */
-            }
-
-            StateRegister = LOADMOD_FDT;
-
             CODEC_TIMER_LOADMOD.INTFLAGS = TC0_OVFIF_bm;
             CODEC_TIMER_LOADMOD.INTCTRLA = TC_OVFINTLVL_HI_gc;
-
-            /* Determine if we did not receive a multiple of 8 bits.
-             * If this is the case, right-align the remaining data and
-             * store it into the buffer. */
-            uint8_t RemainingBits = BitCount % 8;
-            if (RemainingBits != 0) {
-                uint8_t NewDataRegister = DataRegister;
-
-                while (RemainingBits++ < 8) {
-                    /* Pad with zeroes to right-align. */
-                    NewDataRegister >>= 1;
-                }
-
-                /* TODO: Prevent buffer overflow */
-                *CodecBufferPtr = NewDataRegister;
-            }
-
-            /* Signal, that we have finished sampling */
-            Flags.DemodFinished = 1;
             char buf[10];
-            int n = sprintf( buf, "%d", F_CPU);
+            sprintf(buf, "%x\r\n", SampleRegister);
             TerminalSendString(buf);
+    }
 
+    if (!(SampleRegister & 0x1)){ //if last read bit is a zero
+        if (SampleRegister & 0x1E) {
+            // We have read a 1
+            *CodecBufferPtr = 'A';
+            CodecBufferPtr++;
+        } else if (SampleRegister & 0x6){
+            // We have read a 0
+            *CodecBufferPtr = 'B';
+            CodecBufferPtr++;
         } else {
+            //We have read garbage
+            Flags.DemodFinished = 1;
+        }
+        SampleIdxRegister = 0;
+    }
+
+//    char buf[40];
+//    if (SamplePin){
+//        sprintf(buf, "Sampling 1\r\n");
+//    } else if (SampleRegister & 0x00) {
+//        sprintf(buf, "Sampling 0\r\n");
+//    } else {
+//        sprintf(buf, "Sampling fail\r\n");
+//    }
+//    TerminalSendString(buf);
+
+
+//    if (SampleIdxRegister) {
+//        SampleIdxRegister = 0;
+//
+//        /* Analyze the sampling register after 2 samples. */
+//        if ((SampleRegister & 0x07) == 0x07) {
+//
+//            /* No carrier modulation for 3 sample points. EOC! */
+//            CODEC_TIMER_SAMPLING.CTRLA = TC_CLKSEL_OFF_gc;
+//            CODEC_TIMER_SAMPLING.INTFLAGS = TC0_CCAIF_bm;
+//
+//            /* By this time, the FDT timer is aligned to the last modulation
+//             * edge of the reader. So we disable the auto-synchronization and
+//             * let it count the frame delay time in the background, and generate
+//             * an interrupt once it has reached the FDT. */
+//            CODEC_TIMER_LOADMOD.CTRLD = TC_EVACT_OFF_gc;
+//
+//            if (SampleRegister & 0x08) {
+//                CODEC_TIMER_LOADMOD.PER = ISO14443A_FRAME_DELAY_PREV1 - 40; /* compensate for ISR prolog */
+//            } else {
+//                CODEC_TIMER_LOADMOD.PER = ISO14443A_FRAME_DELAY_PREV0 - 40; /* compensate for ISR prolog */
+//            }
+//
+//            StateRegister = LOADMOD_FDT;
+//
+//            CODEC_TIMER_LOADMOD.INTFLAGS = TC0_OVFIF_bm;
+//            CODEC_TIMER_LOADMOD.INTCTRLA = TC_OVFINTLVL_HI_gc;
+//
+//            /* Determine if we did not receive a multiple of 8 bits.
+//             * If this is the case, right-align the remaining data and
+//             * store it into the buffer. */
+//            uint8_t RemainingBits = BitCount % 8;
+//            if (RemainingBits != 0) {
+//                uint8_t NewDataRegister = DataRegister;
+//
+//                while (RemainingBits++ < 8) {
+//                    /* Pad with zeroes to right-align. */
+//                    NewDataRegister >>= 1;
+//                }
+//
+//                /* TODO: Prevent buffer overflow */
+//                *CodecBufferPtr = NewDataRegister;
+//            }
+//
+//            /* Signal, that we have finished sampling */
+//            Flags.DemodFinished = 1;
+//
+//        } else {
 //            /* Otherwise, we check the two sample bits from the bit before. */
 //            uint8_t BitSample = SampleRegister & 0xC;
 //            uint8_t Bit = 0;
@@ -258,21 +313,23 @@ ISR_SHARED isr_ISO14443_F_CODEC_TIMER_SAMPLING_CCA_VECT(void){
 //                /* 00 sequence. -> No valid data yet. This also occurs if we just started
 //                 * sampling and have sampled less than 2 bits yet. Thus ignore. */
 //            }
-        }
-    } else {
-        /* On odd sample position just sample. */
-        // WHY
-        SampleIdxRegister = ~SampleIdxRegister;
-    }
+//        }
+//    } else {
+//        /* On odd sample position just sample. */
+//        // WHY
+//        SampleIdxRegister = ~SampleIdxRegister;
+//    }
+
+    set_PE0_low();
 
     /* Make sure the sampling timer gets automatically aligned to the
      * modulation pauses by using the RESTART event.
      * This can be understood as a "poor mans PLL" and makes sure that we are
      * never too far out the bit-grid while sampling. */
-    CODEC_TIMER_SAMPLING.CTRLD = TC_EVACT_RESTART_gc | CODEC_TIMER_MODSTART_EVSEL;
+    CODEC_TIMER_SAMPLING.CTRLD = TC_EVACT_RESTART_gc | CODEC_TIMER_MODEND_EVSEL;
 }
 
-// Enumulate as a card to send card responds
+// Modulate as a card to send card response
 ISR_SHARED isr_ISO14443_F_CODEC_TIMER_LOADMOD_OVF_VECT(void) {
    return;
     /* Bit rate timer. Output a half bit on the output. */
@@ -431,7 +488,7 @@ ISR_SHARED isr_ISO14443_F_CODEC_TIMER_LOADMOD_OVF_VECT(void) {
 }
 
 void ISO14443FCodecInit(void) {
-    TerminalSendString("Legic ISO14443FCodecInit\n");
+    TerminalSendString("Legic ISO14443FCodecInit\r\n");
 
     /* Initialize some global vars and start looking out for reader commands */
     Flags.DemodFinished = 0;
@@ -446,7 +503,7 @@ void ISO14443FCodecInit(void) {
 }
 
 void ISO14443FCodecDeInit(void) {
-    TerminalSendString("Legic ISO14443FCodecDeInit\n");
+    TerminalSendString("Legic ISO14443FCodecDeInit\r\n");
 
     /* Gracefully shutdown codec */
     CODEC_DEMOD_IN_PORT.INT0MASK = 0;
@@ -474,7 +531,8 @@ void ISO14443FCodecDeInit(void) {
 void ISO14443FCodecTask(void) {
 
     if (Flags.DemodFinished) {
-        TerminalSendString("Legic DemodFinished\n");
+        TerminalSendString((char*)CodecBuffer);
+        TerminalSendString("Legic DemodFinished\r\n");
 
         Flags.DemodFinished = 0;
         /* Reception finished. Process the received bytes */
@@ -519,7 +577,7 @@ void ISO14443FCodecTask(void) {
     }
 
     if (Flags.LoadmodFinished) {
-        TerminalSendString("Legic LoadmodFinished\n");
+        TerminalSendString("Legic LoadmodFinished\r\n");
 
         Flags.LoadmodFinished = 0;
         /* Load modulation has been finished. Stop it and start to listen
