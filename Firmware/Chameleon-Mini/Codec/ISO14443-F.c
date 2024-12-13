@@ -9,14 +9,7 @@
 #include "Codec.h"
 #include "Log.h"
 
-void set_PE0_high(void){
-    PORTE.DIRSET |= PIN0_bm;
-    PORTE.OUTSET |= PIN0_bm;
-}
 
-void set_PE0_low(void){
-    PORTE.OUTCLR |= PIN0_bm;
-}
 
 /* Sampling is done using internal clock, synchronized to the field modulation.
  * For that we need to convert the bit rate for the internal clock. */
@@ -87,6 +80,33 @@ typedef enum {
 #define BitCount		CodecCount16Register2
 #define CodecBufferPtr	CodecPtrRegister1
 #define ParityBufferPtr	CodecPtrRegister2
+
+/* Nastav pin PE0 na HIGH */
+INLINE void set_PE0_high(void){
+    PORTE.DIRSET |= PIN0_bm;
+    PORTE.OUTSET |= PIN0_bm;
+}
+
+/* Nastav pin PE0 na LOW */
+INLINE void set_PE0_low(void){
+    PORTE.OUTCLR |= PIN0_bm;
+}
+
+/* Funkce které vyčistí nastavení po tom co demodulujeme bordel */
+INLINE void ISO14443_F_GARBAGE(void){
+    Flags.DemodFinished = 1;
+    /* No carrier modulation for 3 sample points. EOC! */
+    CODEC_TIMER_SAMPLING.CTRLA = TC_CLKSEL_OFF_gc;
+    CODEC_TIMER_SAMPLING.INTFLAGS = TC0_CCAIF_bm;
+
+    /* By this time, the FDT timer is aligned to the last modulation
+     * edge of the reader. So we disable the auto-synchronization and
+     * let it count the frame delay time in the background, and generate
+     * an interrupt once it has reached the FDT. */
+    CODEC_TIMER_LOADMOD.CTRLD = TC_EVACT_OFF_gc;
+    CODEC_TIMER_LOADMOD.INTFLAGS = TC0_OVFIF_bm;
+    CODEC_TIMER_LOADMOD.INTCTRLA = TC_OVFINTLVL_HI_gc;
+}
 
 static void StartDemod(void) {
     TerminalSendString("Legic start demod\r\n");
@@ -166,7 +186,7 @@ ISR_SHARED isr_ISO14443_F_TCD0_CCC_vect(void) {
 // Sampling with timer and demod
 ISR_SHARED isr_ISO14443_F_CODEC_TIMER_SAMPLING_CCA_VECT(void){
     SampleIdxRegister++;
-    /* This interrupt gets called twice for every bit to sample it. */
+
     uint8_t SamplePin = CODEC_DEMOD_IN_PORT.IN & CODEC_DEMOD_IN_MASK;
 
     /* Shift sampled bit into sampling register */
@@ -190,24 +210,21 @@ ISR_SHARED isr_ISO14443_F_CODEC_TIMER_SAMPLING_CCA_VECT(void){
             CODEC_TIMER_LOADMOD.CTRLD = TC_EVACT_OFF_gc;
             CODEC_TIMER_LOADMOD.INTFLAGS = TC0_OVFIF_bm;
             CODEC_TIMER_LOADMOD.INTCTRLA = TC_OVFINTLVL_HI_gc;
-            char buf[10];
-            sprintf(buf, "%x\r\n", SampleRegister);
-            TerminalSendString(buf);
     }
 
     if (!(SampleRegister & 0x1)){ //if last read bit is a zero
-        if (SampleRegister & 0x1E) {
+        if (!(SampleRegister ^ 0x1E)) {
             // We have read a 1
-            *CodecBufferPtr = 'A';
+            *CodecBufferPtr = 0x01;
             CodecBufferPtr++;
-        } else if (SampleRegister & 0x6){
+        } else if (!(SampleRegister ^ 0x06)) {
             // We have read a 0
-            *CodecBufferPtr = 'B';
+            *CodecBufferPtr = 0x00;
             CodecBufferPtr++;
         } else {
-            //We have read garbage
-            Flags.DemodFinished = 1;
+            ISO14443_F_GARBAGE();
         }
+        SampleRegister = 0;
         SampleIdxRegister = 0;
     }
 
@@ -331,156 +348,156 @@ ISR_SHARED isr_ISO14443_F_CODEC_TIMER_SAMPLING_CCA_VECT(void){
 
 // Modulate as a card to send card response
 ISR_SHARED isr_ISO14443_F_CODEC_TIMER_LOADMOD_OVF_VECT(void) {
-   return;
-    /* Bit rate timer. Output a half bit on the output. */
-
-    static void *JumpTable[] = {
-            [LOADMOD_FDT] = && LOADMOD_FDT_LABEL,
-            [LOADMOD_START] = && LOADMOD_START_LABEL,
-            [LOADMOD_START_BIT0] = && LOADMOD_START_BIT0_LABEL,
-            [LOADMOD_START_BIT1] = && LOADMOD_START_BIT1_LABEL,
-            [LOADMOD_DATA0] = && LOADMOD_DATA0_LABEL,
-            [LOADMOD_DATA1] = && LOADMOD_DATA1_LABEL,
-            [LOADMOD_PARITY0] = && LOADMOD_PARITY0_LABEL,
-            [LOADMOD_PARITY1] = && LOADMOD_PARITY1_LABEL,
-            [LOADMOD_STOP_BIT0] = && LOADMOD_STOP_BIT0_LABEL,
-            [LOADMOD_STOP_BIT1] = && LOADMOD_STOP_BIT1_LABEL,
-            [LOADMOD_FINISHED] = && LOADMOD_FINISHED_LABEL
-    };
-
-    if ((StateRegister >= LOADMOD_FDT) && (StateRegister <= LOADMOD_FINISHED)) {
-        goto *JumpTable[StateRegister];
-    } else {
-        return;
-    }
-
-    LOADMOD_FDT_LABEL:
-    /* No data has been produced, but FDT has ended. Switch over to bit-grid aligning. */
-    CODEC_TIMER_LOADMOD.PER = ISO14443A_BIT_GRID_CYCLES - 1;
-    return;
-
-    LOADMOD_START_LABEL:
-    /* Application produced data. With this interrupt we are aligned to the bit-grid. */
-    /* Fallthrough to first bit */
-
-    LOADMOD_START_BIT0_LABEL:
-    /* Start subcarrier generation, output startbit and align to bitrate. */
-    CodecSetLoadmodState(true);
-    CodecStartSubcarrier();
-
-    CODEC_TIMER_LOADMOD.PER = ISO14443F_BIT_RATE_CYCLES / 2 - 1;
-    StateRegister = LOADMOD_START_BIT1;
-    return;
-
-
-    LOADMOD_START_BIT1_LABEL:
-    CodecSetLoadmodState(false);
-    StateRegister = LOADMOD_DATA0;
-    ParityRegister = ~0;
-    BitSent = 0;
-
-    /* Prefetch first byte */
-    DataRegister = *CodecBufferPtr;
-    return;
-
-    LOADMOD_DATA0_LABEL:
-    if (DataRegister & 1) {
-        CodecSetLoadmodState(true);
-        ParityRegister = ~ParityRegister;
-    } else {
-        CodecSetLoadmodState(false);
-    }
-
-    StateRegister = LOADMOD_DATA1;
-    return;
-
-    LOADMOD_DATA1_LABEL:
-    if (DataRegister & 1) {
-        CodecSetLoadmodState(false);
-    } else {
-        CodecSetLoadmodState(true);
-    }
-
-    DataRegister = DataRegister >> 1;
-    BitSent++;
-
-    if ((BitSent % 8) == 0) {
-        /* Byte boundary. Load parity bit and output it later. */
-        StateRegister = LOADMOD_PARITY0;
-    } else if (BitSent == BitCount) {
-        /* End of transmission without byte boundary. Don't send parity. */
-        StateRegister = LOADMOD_STOP_BIT0;
-    } else {
-        /* Next bit is data */
-        StateRegister = LOADMOD_DATA0;
-    }
-
-    return;
-
-    LOADMOD_PARITY0_LABEL:
-    if (ParityBufferPtr != NULL) {
-        if (*ParityBufferPtr) {
-            CodecSetLoadmodState(true);
-        } else {
-            CodecSetLoadmodState(false);
-        }
-    } else {
-        if (ParityRegister) {
-            CodecSetLoadmodState(true);
-        } else {
-            CodecSetLoadmodState(false);
-        }
-    }
-    StateRegister = LOADMOD_PARITY1;
-    return;
-
-    LOADMOD_PARITY1_LABEL:
-    if (ParityBufferPtr != NULL) {
-        if (*ParityBufferPtr) {
-            CodecSetLoadmodState(false);
-        } else {
-            CodecSetLoadmodState(true);
-        }
-
-        ParityBufferPtr++;
-    } else {
-        if (ParityRegister) {
-            CodecSetLoadmodState(false);
-        } else {
-            CodecSetLoadmodState(true);
-        }
-
-        ParityRegister = ~0;
-    }
-
-    if (BitSent == BitCount) {
-        /* No data left */
-        StateRegister = LOADMOD_STOP_BIT0;
-    } else {
-        /* Fetch next data and continue sending bits. */
-        DataRegister = *++CodecBufferPtr;
-        StateRegister = LOADMOD_DATA0;
-    }
-
-    return;
-
-    LOADMOD_STOP_BIT0_LABEL:
-    CodecSetLoadmodState(false);
-    StateRegister = LOADMOD_STOP_BIT1;
-    return;
-
-    LOADMOD_STOP_BIT1_LABEL:
-    CodecSetLoadmodState(false);
-    StateRegister = LOADMOD_FINISHED;
-    return;
-
-    LOADMOD_FINISHED_LABEL:
-    /* We have written all of our bits. Deactivate the loadmod
-     * timer. Also disable the bit-rate interrupt again. And
-     * stop the subcarrier divider. */
-    CODEC_TIMER_LOADMOD.CTRLA = TC_CLKSEL_OFF_gc;
-    CODEC_TIMER_LOADMOD.INTCTRLA = 0;
-    CodecSetSubcarrier(CODEC_SUBCARRIERMOD_OFF, 0);
+//   return;
+//    /* Bit rate timer. Output a half bit on the output. */
+//
+//    static void *JumpTable[] = {
+//            [LOADMOD_FDT] = && LOADMOD_FDT_LABEL,
+//            [LOADMOD_START] = && LOADMOD_START_LABEL,
+//            [LOADMOD_START_BIT0] = && LOADMOD_START_BIT0_LABEL,
+//            [LOADMOD_START_BIT1] = && LOADMOD_START_BIT1_LABEL,
+//            [LOADMOD_DATA0] = && LOADMOD_DATA0_LABEL,
+//            [LOADMOD_DATA1] = && LOADMOD_DATA1_LABEL,
+//            [LOADMOD_PARITY0] = && LOADMOD_PARITY0_LABEL,
+//            [LOADMOD_PARITY1] = && LOADMOD_PARITY1_LABEL,
+//            [LOADMOD_STOP_BIT0] = && LOADMOD_STOP_BIT0_LABEL,
+//            [LOADMOD_STOP_BIT1] = && LOADMOD_STOP_BIT1_LABEL,
+//            [LOADMOD_FINISHED] = && LOADMOD_FINISHED_LABEL
+//    };
+//
+//    if ((StateRegister >= LOADMOD_FDT) && (StateRegister <= LOADMOD_FINISHED)) {
+//        goto *JumpTable[StateRegister];
+//    } else {
+//        return;
+//    }
+//
+//    LOADMOD_FDT_LABEL:
+//    /* No data has been produced, but FDT has ended. Switch over to bit-grid aligning. */
+//    CODEC_TIMER_LOADMOD.PER = ISO14443A_BIT_GRID_CYCLES - 1;
+//    return;
+//
+//    LOADMOD_START_LABEL:
+//    /* Application produced data. With this interrupt we are aligned to the bit-grid. */
+//    /* Fallthrough to first bit */
+//
+//    LOADMOD_START_BIT0_LABEL:
+//    /* Start subcarrier generation, output startbit and align to bitrate. */
+//    CodecSetLoadmodState(true);
+//    CodecStartSubcarrier();
+//
+//    CODEC_TIMER_LOADMOD.PER = ISO14443F_BIT_RATE_CYCLES / 2 - 1;
+//    StateRegister = LOADMOD_START_BIT1;
+//    return;
+//
+//
+//    LOADMOD_START_BIT1_LABEL:
+//    CodecSetLoadmodState(false);
+//    StateRegister = LOADMOD_DATA0;
+//    ParityRegister = ~0;
+//    BitSent = 0;
+//
+//    /* Prefetch first byte */
+//    DataRegister = *CodecBufferPtr;
+//    return;
+//
+//    LOADMOD_DATA0_LABEL:
+//    if (DataRegister & 1) {
+//        CodecSetLoadmodState(true);
+//        ParityRegister = ~ParityRegister;
+//    } else {
+//        CodecSetLoadmodState(false);
+//    }
+//
+//    StateRegister = LOADMOD_DATA1;
+//    return;
+//
+//    LOADMOD_DATA1_LABEL:
+//    if (DataRegister & 1) {
+//        CodecSetLoadmodState(false);
+//    } else {
+//        CodecSetLoadmodState(true);
+//    }
+//
+//    DataRegister = DataRegister >> 1;
+//    BitSent++;
+//
+//    if ((BitSent % 8) == 0) {
+//        /* Byte boundary. Load parity bit and output it later. */
+//        StateRegister = LOADMOD_PARITY0;
+//    } else if (BitSent == BitCount) {
+//        /* End of transmission without byte boundary. Don't send parity. */
+//        StateRegister = LOADMOD_STOP_BIT0;
+//    } else {
+//        /* Next bit is data */
+//        StateRegister = LOADMOD_DATA0;
+//    }
+//
+//    return;
+//
+//    LOADMOD_PARITY0_LABEL:
+//    if (ParityBufferPtr != NULL) {
+//        if (*ParityBufferPtr) {
+//            CodecSetLoadmodState(true);
+//        } else {
+//            CodecSetLoadmodState(false);
+//        }
+//    } else {
+//        if (ParityRegister) {
+//            CodecSetLoadmodState(true);
+//        } else {
+//            CodecSetLoadmodState(false);
+//        }
+//    }
+//    StateRegister = LOADMOD_PARITY1;
+//    return;
+//
+//    LOADMOD_PARITY1_LABEL:
+//    if (ParityBufferPtr != NULL) {
+//        if (*ParityBufferPtr) {
+//            CodecSetLoadmodState(false);
+//        } else {
+//            CodecSetLoadmodState(true);
+//        }
+//
+//        ParityBufferPtr++;
+//    } else {
+//        if (ParityRegister) {
+//            CodecSetLoadmodState(false);
+//        } else {
+//            CodecSetLoadmodState(true);
+//        }
+//
+//        ParityRegister = ~0;
+//    }
+//
+//    if (BitSent == BitCount) {
+//        /* No data left */
+//        StateRegister = LOADMOD_STOP_BIT0;
+//    } else {
+//        /* Fetch next data and continue sending bits. */
+//        DataRegister = *++CodecBufferPtr;
+//        StateRegister = LOADMOD_DATA0;
+//    }
+//
+//    return;
+//
+//    LOADMOD_STOP_BIT0_LABEL:
+//    CodecSetLoadmodState(false);
+//    StateRegister = LOADMOD_STOP_BIT1;
+//    return;
+//
+//    LOADMOD_STOP_BIT1_LABEL:
+//    CodecSetLoadmodState(false);
+//    StateRegister = LOADMOD_FINISHED;
+//    return;
+//
+//    LOADMOD_FINISHED_LABEL:
+//    /* We have written all of our bits. Deactivate the loadmod
+//     * timer. Also disable the bit-rate interrupt again. And
+//     * stop the subcarrier divider. */
+//    CODEC_TIMER_LOADMOD.CTRLA = TC_CLKSEL_OFF_gc;
+//    CODEC_TIMER_LOADMOD.INTCTRLA = 0;
+//    CodecSetSubcarrier(CODEC_SUBCARRIERMOD_OFF, 0);
 
     /* Signal application that we have finished loadmod */
     Flags.LoadmodFinished = 1;
@@ -531,10 +548,15 @@ void ISO14443FCodecDeInit(void) {
 void ISO14443FCodecTask(void) {
 
     if (Flags.DemodFinished) {
-        *CodecBufferPtr++ = '\r';
-        *CodecBufferPtr++ = '\n';
-        TerminalSendString((char*)CodecBuffer);
-        TerminalSendString("Legic DemodFinished\r\n");
+        TerminalSendString("Data sampled: ");
+        uint8_t * bufind = CodecBuffer;
+        while (bufind != CodecBufferPtr) {
+            char c[10];
+            sprintf(c, "%x ", *bufind);
+            TerminalSendString(c);
+            bufind++;
+        }
+        TerminalSendString("\r\nLegic DemodFinished\r\n");
 
         Flags.DemodFinished = 0;
         /* Reception finished. Process the received bytes */
