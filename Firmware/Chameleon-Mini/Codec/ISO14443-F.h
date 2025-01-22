@@ -10,6 +10,8 @@
 #define ISO14443_F_H_
 #include "Codec.h"
 
+#define ISO14443F_APP_NO_RESPONSE       0x0000
+
 /* Codec Interface */
 void ISO14443FCodecInit(void);
 void ISO14443FCodecDeInit(void);
