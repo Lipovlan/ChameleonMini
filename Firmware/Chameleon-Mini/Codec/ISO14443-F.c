@@ -179,40 +179,9 @@ static void StartDemod(void) {
 /* This handles the interrupt raised after first event on the DEMOD pin
  * Starts CODEC_TIMER_SAMPLING for sampling the reader's data */
 ISR_SHARED isr_ISO14443_F_CODEC_DEMOD_IN_INT0_VECT(void) {
-
-//    CODEC_TIMER_SAMPLING.INTFLAGS = TC0_CCAIF_bm; /* Clear CCA interrupt flag */
-//    CODEC_TIMER_SAMPLING.INTCTRLB = TC_CCAINTLVL_HI_gc; /* Re-enable CCA interrupts */
-    //TODO: WIP
-//    CODEC_TIMER_SAMPLING.CNT = 0;
-
-//    /* This is the first edge of the first modulation-pause after StartDemod.
-//     * Now we have time to start
-//     * demodulating beginning from one bit-width after this edge. */
-//
-//    /* Sampling timer has been preset in StartDemod() to sample-rate and has automatically synced
-//     * to THIS first modulation pause. Thus after exactly one bit-width from here,
-//     * an OVF is generated. We want to start sampling with the next bit and use the
-//     * XYZBUF mechanism of the xmega to automatically double the sampling rate on the
-//     * next overflow. For this we have to temporarily deactivate the automatical alignment
-//     * in order to catch next overflow event for updating the BUF registers.*/
-    CODEC_TIMER_SAMPLING.CTRLD = TC_EVACT_OFF_gc;
-    CODEC_TIMER_SAMPLING.PERBUF = SAMPLE_RATE_IN_SYSTEM_CYCLES - 1; /* Perioda samplování v CPU cyklech */
-    /* Počet CPU cyklů po kterých začne samplování. Ty se počítají (nevím) buď
-     * a) hned po sestupné hraně DEMOD pinu
-     * b) jednu periodu po vzestupné hraně DEMOD pinu - spíš asi tohle*/
+    CODEC_TIMER_SAMPLING.INTFLAGS = TC0_CCAIF_bm; /* Clear CCA interrupt flag */
+    CODEC_TIMER_SAMPLING.INTCTRLB = TC_CCAINTLVL_HI_gc; /* Re-enable CCA interrupts */
     CODEC_TIMER_SAMPLING.CCABUF = SAMPLE_RATE_IN_SYSTEM_CYCLES / 2 ;
-
-//    /* Setup Frame Delay Timer and wire to EVSYS. Frame delay time is
-//     * measured from last change in RF field, therefore we use
-//     * the event channel 1 (end of modulation pause) as the restart event.
-//     * The preliminary frame delay time chosen here is irrelevant, because
-//     * the correct FDT gets set automatically after demodulation. */
-//    CODEC_TIMER_LOADMOD.CNT = 0;
-//    CODEC_TIMER_LOADMOD.PER = 0xFFFF;
-//    CODEC_TIMER_LOADMOD.CTRLD = TC_EVACT_RESTART_gc | CODEC_TIMER_MODEND_EVSEL;
-//    CODEC_TIMER_LOADMOD.INTCTRLA = TC_OVFINTLVL_OFF_gc;
-//    CODEC_TIMER_LOADMOD.INTFLAGS = TC0_OVFIF_bm;
-//    CODEC_TIMER_LOADMOD.CTRLA = CODEC_TIMER_CARRIER_CLKSEL;
 
     /* Disable this interrupt. From now on we will sample the field using our CODEC_TIMER_SAMPLING */
     CODEC_DEMOD_IN_PORT.INT0MASK = 0;
