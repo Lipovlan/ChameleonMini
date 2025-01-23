@@ -200,7 +200,11 @@ ISR_SHARED isr_ISO14443_F_CODEC_DEMOD_IN_INT0_VECT(void) {
     CODEC_DEMOD_IN_PORT.INT0MASK = 0;
 
 }
+void disable_loadmod_timer(void){
+    CODEC_TIMER_LOADMOD.CTRLA = TC_CLKSEL_OFF_gc;
+    CODEC_TIMER_LOADMOD.INTCTRLA = 0;
 
+}
 // Sampling with timer and demod
 ISR_SHARED isr_ISO14443_F_CODEC_TIMER_SAMPLING_CCA_VECT(void){
     SampleIdxRegister++;
@@ -282,27 +286,25 @@ TRANSMIT_START_LABEL:
     BitSent = 0;
     /* Fallthrough */
 TRANSMIT_BIT_LABEL:
-    set_PE0_high();
-    set_PE0_low();
+    StateRegister = TRANSMIT_BIT;
     CodecSetLoadmodState(CodecBuffer[BitSent]);
     CodecStartSubcarrier();
     BitSent++;
     if (BitSent >= BitCount){
-        TerminalSendString("Transmission ended success\r\n");
         StateRegister = TRANSMIT_END;
     }
-    StateRegister = TRANSMIT_BIT;
     return;
 
 TRANSMIT_END_LABEL:
+    set_PE0_high();
+
 //    TerminalSendString("Transmit label end \r\n");
     StateRegister = TRANSMIT_NONE;
     CodecSetLoadmodState(false);
     CodecSetSubcarrier(CODEC_SUBCARRIERMOD_OFF, ISO14443F_SUBCARRIER_DIVIDER);
 
-    CODEC_TIMER_LOADMOD.CTRLA = TC_CLKSEL_OFF_gc;
-    CODEC_TIMER_LOADMOD.INTCTRLA = 0;
-
+    disable_loadmod_timer();
+    set_PE0_low();
     Flags.LoadmodFinished = 1;
     return;
 
@@ -391,8 +393,7 @@ void ISO14443FCodecTask(void) {
             StateRegister = TRANSMIT_START;
         } else {
             /* No data to be processed. Disable loadmodding and start listening again */
-            CODEC_TIMER_LOADMOD.CTRLA = TC_CLKSEL_OFF_gc;
-            CODEC_TIMER_LOADMOD.INTCTRLA = 0;
+            disable_loadmod_timer();
             StartDemod();
         }
     }
