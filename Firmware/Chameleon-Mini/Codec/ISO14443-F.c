@@ -41,9 +41,8 @@
 // a dash takes 10us, stars symbolise a measurement that should be every 20us
 // we decode HHHHL as 1 and HHHL as 0
 
-//#define SAMPLE_RATE_IN_SYSTEM_CYCLES		((uint16_t) (((uint64_t) F_CPU * ISO14443A_BIT_RATE_CYCLES) / CODEC_CARRIER_FREQ) )
 #define SAMPLE_RATE_IN_SYSTEM_CYCLES		((uint16_t) (((uint64_t) F_CPU * ISO14443F_BIT_RATE_CYCLES) / CODEC_CARRIER_FREQ) )
-
+#define TRANSMIT_RATE_IN_SYSTEM_CYCLES  1361
 #define ISO14443A_MIN_BITS_PER_FRAME		7
 
 static volatile struct {
@@ -52,16 +51,17 @@ static volatile struct {
 } Flags = { 0 };
 
 typedef enum {
+    TRANSMIT_FIRST_DELAY,
     TRANSMIT_NONE,
     TRANSMIT_START,
+    TRANSMIT_BIT,
     TRANSMIT_END
 } StateType;
 
 /* Define pseudo variables to use fast register access. This is useful for global vars */
 #define DataRegister	Codec8Reg0
-// TODO: Nepoužíváme StateRegister
 #define StateRegister	Codec8Reg1
-#define ParityRegister	Codec8Reg2
+#define TransmitSynced	Codec8Reg2
 #define SampleIdxRegister Codec8Reg2
 #define SampleRegister	Codec8Reg3
 #define BitSent			CodecCount16Register1
@@ -85,36 +85,31 @@ INLINE void set_PE0_low(void){
 }
 
 INLINE void ISO14443_F_DEMOD_END(void) {
-    TerminalSendString("DEMOD END \r\n");
 
     SampleIdxRegister = 0;
-    Flags.DemodFinished = 1;
     /* Disable demodulation interrupt */
     CODEC_TIMER_SAMPLING.CTRLA = TC_CLKSEL_OFF_gc; /* Disconnect system clock from demod timer */
     CODEC_TIMER_SAMPLING.CTRLD = TC_EVACT_OFF_gc; /* Remove action from timer */
     CODEC_TIMER_SAMPLING.INTCTRLB = TC_CCAINTLVL_OFF_gc; /* Disable CCA interrupts */
     CODEC_TIMER_SAMPLING.INTFLAGS = TC0_CCAIF_bm; /* Clear CCA interrupt flag */
 
-
-    /* Enable loadmodulation interrupt */
-    // TODO: Počkej nějakej čas než začneš samplovat?
-    CODEC_TIMER_LOADMOD.PER = 1230;
-    /* By this time, the FDT timer is aligned to the last modulation
+    /* By this time, the LOADMOD timer is aligned to the last modulation
      * edge of the reader. So we disable the auto-synchronization and
      * let it count the frame delay time in the background, and generate
      * an interrupt once it has reached the FDT. */
-    CODEC_TIMER_LOADMOD.CNT = 0;
-    CODEC_TIMER_LOADMOD.PER = 0xFFFF;
-    CODEC_TIMER_LOADMOD.CTRLA = CODEC_TIMER_CARRIER_CLKSEL;
     CODEC_TIMER_LOADMOD.CTRLD = TC_EVACT_OFF_gc;
+    CODEC_TIMER_LOADMOD.PER = 4470; /* +- 330 microseconds */
     CODEC_TIMER_LOADMOD.INTFLAGS = TC0_OVFIF_bm;
     CODEC_TIMER_LOADMOD.INTCTRLA = TC_OVFINTLVL_HI_gc;
+    StateRegister = TRANSMIT_FIRST_DELAY;
+    TransmitSynced = 0;
+    Flags.DemodFinished = 1;
+
 }
 
 /* Funkce které vyčistí nastavení po tom co demodulujeme bordel */
 INLINE void ISO14443_F_GARBAGE(void){
     //TODO: Nic z tohohle není nejspíš správně, mělo by to jen vyčistit nastavení
-    TerminalSendString("GARBAGE \r\n");
 
     ISO14443_F_DEMOD_END();
     //    Flags.DemodFinished = 1;
@@ -139,8 +134,8 @@ INLINE void ISO14443_F_GARBAGE(void){
 //    CODEC_TIMER_LOADMOD.INTFLAGS = TC0_OVFIF_bm;
 //    CODEC_TIMER_LOADMOD.INTCTRLA = TC_OVFINTLVL_HI_gc;
 }
+
 static void StartDemod(void) {
-    TerminalSendString("Legic start demod\r\n");
 
     /* Activate Power for demodulator */
     CodecSetDemodPower(true);
@@ -151,7 +146,7 @@ static void StartDemod(void) {
     SampleRegister = 0;
     SampleIdxRegister = 0;
     BitCount = 0;
-    StateRegister = TRANSMIT_NONE;
+//    StateRegister = TRANSMIT_NONE;
 
     /* Configure sampling-timer free running and sync to first modulation-pause. */
     CODEC_TIMER_SAMPLING.CNT = 0; /* Reset the timer's initial value*/
@@ -179,9 +174,27 @@ static void StartDemod(void) {
 /* This handles the interrupt raised after first event on the DEMOD pin
  * Starts CODEC_TIMER_SAMPLING for sampling the reader's data */
 ISR_SHARED isr_ISO14443_F_CODEC_DEMOD_IN_INT0_VECT(void) {
+    /* Enable timer for demodulation */
     CODEC_TIMER_SAMPLING.INTFLAGS = TC0_CCAIF_bm; /* Clear CCA interrupt flag */
     CODEC_TIMER_SAMPLING.INTCTRLB = TC_CCAINTLVL_HI_gc; /* Re-enable CCA interrupts */
     CODEC_TIMER_SAMPLING.CCABUF = SAMPLE_RATE_IN_SYSTEM_CYCLES / 2 ;
+
+    /* Enable loadmodulation interrupt */
+    /* Setup Frame Delay Timer and wire to EVSYS. Frame delay time is
+     * measured from last change in RF field, therefore we use
+     * the event channel 1 (end of modulation pause) as the restart event.
+     * The preliminary frame delay time chosen here is irrelevant, because
+     * the correct FDT gets set automatically after demodulation.
+     *
+     * First entry to isr_ISO14443_F_CODEC_TIMER_LOADMOD_OVF_VECT will set
+     * correct PERiod.
+     * */
+    CODEC_TIMER_LOADMOD.CNT = 0;
+    CODEC_TIMER_LOADMOD.PER = 0xFFFF;
+    CODEC_TIMER_LOADMOD.CTRLD = TC_EVACT_RESTART_gc | CODEC_TIMER_MODEND_EVSEL;
+    CODEC_TIMER_LOADMOD.INTCTRLA = TC_OVFINTLVL_HI_gc;
+    CODEC_TIMER_LOADMOD.INTFLAGS = TC0_OVFIF_bm;
+    CODEC_TIMER_LOADMOD.CTRLA = CODEC_TIMER_CARRIER_CLKSEL; /* Use Carrier wave as timer source */
 
     /* Disable this interrupt. From now on we will sample the field using our CODEC_TIMER_SAMPLING */
     CODEC_DEMOD_IN_PORT.INT0MASK = 0;
@@ -190,7 +203,6 @@ ISR_SHARED isr_ISO14443_F_CODEC_DEMOD_IN_INT0_VECT(void) {
 
 // Sampling with timer and demod
 ISR_SHARED isr_ISO14443_F_CODEC_TIMER_SAMPLING_CCA_VECT(void){
-    set_PE0_high();
     SampleIdxRegister++;
 
     uint8_t SamplePin = CODEC_DEMOD_IN_PORT.IN & CODEC_DEMOD_IN_MASK;
@@ -218,7 +230,7 @@ ISR_SHARED isr_ISO14443_F_CODEC_TIMER_SAMPLING_CCA_VECT(void){
             CodecBufferPtr++;
             BitCount++;
         } else {
-            ISO14443_F_GARBAGE();
+//            ISO14443_F_GARBAGE();
         }
         SampleRegister = 0;
         SampleIdxRegister = 0;
@@ -230,40 +242,60 @@ ISR_SHARED isr_ISO14443_F_CODEC_TIMER_SAMPLING_CCA_VECT(void){
      * This can be understood as a "poor mans PLL" and makes sure that we are
      * never too far out the bit-grid while sampling. */
     CODEC_TIMER_SAMPLING.CTRLD = TC_EVACT_RESTART_gc | CODEC_TIMER_MODEND_EVSEL;
-    set_PE0_low();
 }
 
 // Modulate as a card to send card response
 ISR_SHARED isr_ISO14443_F_CODEC_TIMER_LOADMOD_OVF_VECT(void) {
     static void *JumpTable[] = {
+            [TRANSMIT_FIRST_DELAY] = && TRANSMIT_FIRST_DELAY_LABEL,
             [TRANSMIT_NONE] = && TRANSMIT_NONE_LABEL,
             [TRANSMIT_START] = && TRANSMIT_START_LABEL,
+            [TRANSMIT_BIT] = && TRANSMIT_BIT_LABEL,
             [TRANSMIT_END] = && TRANSMIT_END_LABEL
     };
 
     //TODO: Přidej label ochranu
-//    if ((StateRegister >= TRANSMIT_NONE) && (StateRegister <= TRANSMIT_END)) {
-//        goto *JumpTable[StateRegister];
-//    } else {
-//        return;
-//    }
-    goto *JumpTable[StateRegister];
+    if ((StateRegister >= TRANSMIT_FIRST_DELAY) && (StateRegister <= TRANSMIT_END)) {
+        goto *JumpTable[StateRegister];
+    } else {
+        TerminalSendString("ERROR: Jump to unregistered label!\r\n");
+        return;
+    }
 
 TRANSMIT_NONE_LABEL:
-    TerminalSendString("Transmit label none \r\n");
+//    TerminalSendString("Transmit label none \r\n");
+    return;
+
+TRANSMIT_FIRST_DELAY_LABEL:
+    /* Start interrupting for LOADMOD every 100 microseconds */
+    CODEC_TIMER_LOADMOD.PER = TRANSMIT_RATE_IN_SYSTEM_CYCLES - 1;
+    TransmitSynced = 1;
+
+    /* If we got here from the start label return back to it */
+    if (StateRegister == TRANSMIT_START){goto TRANSMIT_START_LABEL;}
     return;
 
 TRANSMIT_START_LABEL:
-    TerminalSendString("Transmit label start \r\n");
-    StateRegister = TRANSMIT_END;
+    /* If the application layer is too fast, we get to this label before frame delay label*/
+    if (!TransmitSynced){goto TRANSMIT_FIRST_DELAY_LABEL;}
+    StateRegister = TRANSMIT_BIT;
+    BitSent = 0;
+    /* Fallthrough */
+TRANSMIT_BIT_LABEL:
     set_PE0_high();
-    CodecSetLoadmodState(true);
+    set_PE0_low();
+    CodecSetLoadmodState(CodecBuffer[BitSent]);
     CodecStartSubcarrier();
-    CODEC_TIMER_LOADMOD.PER = ISO14443F_BIT_RATE_CYCLES - 1;
+    BitSent++;
+    if (BitSent >= BitCount){
+        TerminalSendString("Transmission ended success\r\n");
+        StateRegister = TRANSMIT_END;
+    }
+    StateRegister = TRANSMIT_BIT;
     return;
 
 TRANSMIT_END_LABEL:
-    TerminalSendString("Transmit label end \r\n");
+//    TerminalSendString("Transmit label end \r\n");
     StateRegister = TRANSMIT_NONE;
     CodecSetLoadmodState(false);
     CodecSetSubcarrier(CODEC_SUBCARRIERMOD_OFF, ISO14443F_SUBCARRIER_DIVIDER);
@@ -272,7 +304,6 @@ TRANSMIT_END_LABEL:
     CODEC_TIMER_LOADMOD.INTCTRLA = 0;
 
     Flags.LoadmodFinished = 1;
-    set_PE0_low();
     return;
 
 }
@@ -325,16 +356,14 @@ void ISO14443FCodecTask(void) {
         Flags.DemodFinished = 0;
 
         // Pošli dekódovaná data na sériovou linku
-        TerminalSendString("Data sampled: ");
-        uint8_t *bufind = CodecBuffer;
-        while (bufind != CodecBufferPtr) {
-            char c[10];
-            sprintf(c, "%x ", *bufind);
-            TerminalSendString(c);
-            bufind++;
-        }
-        TerminalSendString("\r\nLegic DemodFinished\r\n");
-
+//        TerminalSendString("Data sampled: ");
+//        uint8_t *bufind = CodecBuffer;
+//        while (bufind != CodecBufferPtr) {
+//            char c[10];
+//            sprintf(c, "%x ", *bufind);
+//            TerminalSendString(c);
+//            bufind++;
+//        }
         // Zablikej, že jsme přijali data
         LEDHook(LED_CODEC_RX, LED_PULSE);
         // Zaloguj přijatá data - TODO: bity ukládáme jako byty
@@ -343,14 +372,15 @@ void ISO14443FCodecTask(void) {
         uint16_t AnswerBitCount;
         // Zavolej aplikační vrstvu
         // AnswerBitCount = ApplicationProcess(CodecBuffer, BitCount);
+        set_PE0_high();
+        TerminalSendString("Simulating app\r\n");
+        set_PE0_low();
         // TODO: Prozatím vynutíme konkrétní data na odeslání
         uint8_t tmpbf[] = {0x1, 0x0, 0x0, 0x1, 0x1, 0x0};
         memcpy(CodecBuffer, tmpbf, 6);
-        AnswerBitCount = BitCount ? ISO14443F_APP_NO_RESPONSE : ISO14443F_APP_NO_RESPONSE;
+        AnswerBitCount = BitCount ? 6 : ISO14443F_APP_NO_RESPONSE;
 
         if (AnswerBitCount != ISO14443F_APP_NO_RESPONSE) {
-            TerminalSendString("APP response \r\n");
-
 //            // Zablikej, že vysíláme
 //            LEDHook(LED_CODEC_TX, LED_PULSE);
 //            // Zaloguj data co odesíláme - TODO: bity jsou jako byty
@@ -360,65 +390,20 @@ void ISO14443FCodecTask(void) {
             CodecSetSubcarrier(CODEC_SUBCARRIERMOD_OOK, ISO14443F_SUBCARRIER_DIVIDER);
             StateRegister = TRANSMIT_START;
         } else {
-            TerminalSendString("No APP response \r\n");
-
             /* No data to be processed. Disable loadmodding and start listening again */
             CODEC_TIMER_LOADMOD.CTRLA = TC_CLKSEL_OFF_gc;
             CODEC_TIMER_LOADMOD.INTCTRLA = 0;
-            StateRegister = TRANSMIT_NONE;
-
             StartDemod();
         }
+    }
 
-        /* Reception finished. Process the received bytes */
-//        uint16_t DemodBitCount = BitCount;
-//        uint16_t AnswerBitCount = ISO14443A_APP_NO_RESPONSE;
+    if (Flags.LoadmodFinished) {
+//            TerminalSendString("Legic LoadmodFinished\r\n");
 
-//        if (DemodBitCount >= ISO14443A_MIN_BITS_PER_FRAME) {
-//            // For logging data
-//            LogEntry(LOG_INFO_CODEC_RX_DATA, CodecBuffer, (DemodBitCount + 7) / 8);
-//            LEDHook(LED_CODEC_RX, LED_PULSE);
-//
-//            /* Call application if we received data */
-//            AnswerBitCount = ApplicationProcess(CodecBuffer, DemodBitCount);
-//
-//            if (AnswerBitCount & ISO14443A_APP_CUSTOM_PARITY) {
-//                /* Application has generated it's own parity bits.
-//                 * Clear this option bit. */
-//                AnswerBitCount &= ~ISO14443A_APP_CUSTOM_PARITY;
-//                ParityBufferPtr = &CodecBuffer[ISO14443A_BUFFER_PARITY_OFFSET];
-//            } else {
-//                /* We have to generate the parity bits ourself */
-//                ParityBufferPtr = 0;
-//            }
-//        }
-//
-//        if (AnswerBitCount != ISO14443A_APP_NO_RESPONSE) {
-//            LogEntry(LOG_INFO_CODEC_TX_DATA, CodecBuffer, (AnswerBitCount + 7) / 8);
-//            LEDHook(LED_CODEC_TX, LED_PULSE);
-//
-//            BitCount = AnswerBitCount;
-//            CodecBufferPtr = CodecBuffer;
-//            CodecSetSubcarrier(CODEC_SUBCARRIERMOD_OOK, ISO14443F_SUBCARRIER_DIVIDER);
-//
-//            StateRegister = LOADMOD_START;
-//        } else {
-//            /* No data to be processed. Disable loadmodding and start listening again */
-//            CODEC_TIMER_LOADMOD.CTRLA = TC_CLKSEL_OFF_gc;
-//            CODEC_TIMER_LOADMOD.INTCTRLA = 0;
-//
-//            StartDemod();
-//        }
-//    }
-
-        if (Flags.LoadmodFinished) {
-            TerminalSendString("Legic LoadmodFinished\r\n");
-
-            Flags.LoadmodFinished = 0;
-            /* Load modulation has been finished. Stop it and start to listen
-             * for incoming data again. */
-            StartDemod();
-        }
+        Flags.LoadmodFinished = 0;
+        /* Load modulation has been finished. Stop it and start to listen
+         * for incoming data again. */
+        StartDemod();
     }
 }
 
