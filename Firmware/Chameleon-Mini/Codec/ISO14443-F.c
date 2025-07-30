@@ -205,7 +205,10 @@ void disable_loadmod_timer(void){
     CODEC_TIMER_LOADMOD.INTCTRLA = 0;
 
 }
-// Sampling with timer and demod
+
+// This function translates raw signal from the SamplePin to logical bits by reading SamplePin's value every 20us
+// if 2 highs and a low are observed, it stores a logical 0 into CodecBuffer
+// if 4 highs and a low are observed, it stores a logical 1 into CodecBuffer
 ISR_SHARED isr_ISO14443_F_CODEC_TIMER_SAMPLING_CCA_VECT(void){
     SampleIdxRegister++;
 
@@ -222,7 +225,7 @@ ISR_SHARED isr_ISO14443_F_CODEC_TIMER_SAMPLING_CCA_VECT(void){
        ISO14443_F_DEMOD_END();
     }
 
-    if (!(SampleRegister & 0x1)){ //if last read bit is a zero
+    if (!(SampleRegister & 0x1)){ // if last read bit is a zero
         if (!(SampleRegister ^ 0x1E)) {
             // We have read a 1
             *CodecBufferPtr = 0x01;
@@ -234,7 +237,7 @@ ISR_SHARED isr_ISO14443_F_CODEC_TIMER_SAMPLING_CCA_VECT(void){
             CodecBufferPtr++;
             BitCount++;
         } else {
-//            ISO14443_F_GARBAGE();
+//            ISO14443_F_GARBAGE(); //TODO: Handle this case?
         }
         SampleRegister = 0;
         SampleIdxRegister = 0;
@@ -243,7 +246,7 @@ ISR_SHARED isr_ISO14443_F_CODEC_TIMER_SAMPLING_CCA_VECT(void){
 
     /* Make sure the sampling timer gets automatically aligned to the
      * modulation pauses by using the RESTART event.
-     * This can be understood as a "poor mans PLL" and makes sure that we are
+     * This can be understood as a "poor man's phase locked loop" and makes sure that we are
      * never too far out the bit-grid while sampling. */
     CODEC_TIMER_SAMPLING.CTRLD = TC_EVACT_RESTART_gc | CODEC_TIMER_MODEND_EVSEL;
 }
@@ -373,14 +376,8 @@ void ISO14443FCodecTask(void) {
 
         uint16_t AnswerBitCount;
         // Zavolej aplikační vrstvu
-        // AnswerBitCount = ApplicationProcess(CodecBuffer, BitCount);
-        set_PE0_high();
-        TerminalSendString("Simulating app\r\n");
-        set_PE0_low();
-        // TODO: Prozatím vynutíme konkrétní data na odeslání
-        uint8_t tmpbf[] = {0x1, 0x0, 0x0, 0x1, 0x1, 0x0};
-        memcpy(CodecBuffer, tmpbf, 6);
-        AnswerBitCount = BitCount ? 6 : ISO14443F_APP_NO_RESPONSE;
+        AnswerBitCount = ApplicationProcess(CodecBuffer, BitCount);
+
 
         if (AnswerBitCount != ISO14443F_APP_NO_RESPONSE) {
 //            // Zablikej, že vysíláme

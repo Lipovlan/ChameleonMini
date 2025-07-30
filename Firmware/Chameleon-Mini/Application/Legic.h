@@ -12,7 +12,6 @@
 
 void LegicAppInit(void);
 void LegicAppReset(void);
-void LegicAppTask(void);
 
 uint16_t LegicAppProcess(uint8_t *Buffer, uint16_t BitCount);
 
