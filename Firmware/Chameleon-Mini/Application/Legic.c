@@ -15,6 +15,8 @@ char legic_log_str[64];
 #include "Crypto1.h"
 #include "../Random.h"
 
+uint8_t response_index;
+
 static enum {
     STATE_HALT,
     STATE_IDLE,
@@ -39,8 +41,8 @@ uint16_t LegicAppProcess(uint8_t *Buffer, uint16_t BitCount) {
     switch(BitCount){
         case 7:
             // Probably start of setup phase
-            tmpbf[0] = 0x1; tmpbf[3] = 0x1; tmpbf[4] = 0x1;
-            memcpy(CodecBuffer, tmpbf, 6);
+            tmpbf[0] = 0x19;
+            memcpy(CodecBuffer, tmpbf, 1);
             return 6;
         case 6:
             // Probably end of setup phase
@@ -50,8 +52,21 @@ uint16_t LegicAppProcess(uint8_t *Buffer, uint16_t BitCount) {
             // Fallthrough to case 11
         case 11:
             // Probably reading MIM1024 card
-            tmpbf[0] = 0x1; tmpbf[1] = 0x1; tmpbf[2] = 0x1; tmpbf[5] = 0x1; tmpbf[8] = 0x1; tmpbf[9] = 0x1; tmpbf[11] = 0x1;
-            memcpy(CodecBuffer, tmpbf, 12);
+            switch(response_index){
+                case 0:
+                    tmpbf[0] = 0x27; tmpbf[1] = 0xB; response_index++; break;
+                case 1:
+                    tmpbf[0] = 0x9B; tmpbf[1] = 0x1; response_index++; break;
+                case 2:
+                    tmpbf[0] = 0xA1; tmpbf[1] = 0x1; response_index++; break;
+                case 3:
+                    tmpbf[0] = 0x6D; tmpbf[1] = 0xA; response_index++; break;
+                case 4:
+                    tmpbf[0] = 0x52; tmpbf[1] = 0x3; response_index++; break;
+            }
+
+
+            memcpy(CodecBuffer, tmpbf, 2);
             return 12;
         default:
             return ISO14443F_APP_NO_RESPONSE; //TODO: die horribly here?
@@ -72,6 +87,7 @@ void LegicSetUid(ConfigurationUidType Uid) {
     LogEntry(LOG_INFO_GENERIC, legic_log_str, strlen(legic_log_str));
 }
 void LegicAppInit(void) {
+    response_index = 0;
     sprintf(legic_log_str, "LEGIC APP INIT");
     LogEntry(LOG_INFO_GENERIC, legic_log_str, strlen(legic_log_str));
 
@@ -79,6 +95,7 @@ void LegicAppInit(void) {
 }
 
 void LegicAppReset(void) {
+    response_index = 0;
     State = STATE_IDLE;
 }
 
