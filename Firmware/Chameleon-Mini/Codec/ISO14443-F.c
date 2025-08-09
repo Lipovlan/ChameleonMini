@@ -66,7 +66,6 @@ typedef enum {
 #define SampleRegister	Codec8Reg3
 #define BitSent			CodecCount16Register1
 #define BitCount		CodecCount16Register2
-#define CodecBufferPtr	CodecPtrRegister1
 #define ParityBufferPtr	CodecPtrRegister2
 
 /* Nastav pin PE0 na HIGH
@@ -139,8 +138,6 @@ static void StartDemod(void) {
 
     /* Activate Power for demodulator */
     CodecSetDemodPower(true);
-
-    CodecBufferPtr = CodecBuffer;
     ParityBufferPtr = &CodecBuffer[ISO14443A_BUFFER_PARITY_OFFSET];
     DataRegister = 0;
     SampleRegister = 0;
@@ -206,6 +203,22 @@ void disable_loadmod_timer(void){
 
 }
 
+void set_bit_on_position_in_buffer_to_value(volatile uint8_t * buffer, uint16_t position, uint8_t value){
+    uint16_t byte_offset = position / 8;
+    uint8_t bit_offset = position % 8;
+
+    if (value){
+        buffer[byte_offset] |= (1 << bit_offset);        // Set bit to 1
+    } else {
+        buffer[byte_offset] &= ~(1 << bit_offset);        // Set bit to 0
+    }
+}
+uint8_t get_bit_on_position_in_buffer(const uint8_t * buffer, uint16_t position){
+    uint16_t byte_offset = position / 8;
+    uint8_t bit_offset = position % 8;
+
+    return (buffer[byte_offset] & (1 << bit_offset)) >> bit_offset;
+}
 // This function translates raw signal from the SamplePin to logical bits by reading SamplePin's value every 20us
 // if 2 highs and a low are observed, it stores a logical 0 into CodecBuffer
 // if 4 highs and a low are observed, it stores a logical 1 into CodecBuffer
@@ -228,13 +241,15 @@ ISR_SHARED isr_ISO14443_F_CODEC_TIMER_SAMPLING_CCA_VECT(void){
     if (!(SampleRegister & 0x1)){ // if last read bit is a zero
         if (!(SampleRegister ^ 0x1E)) {
             // We have read a 1
-            *CodecBufferPtr = 0x01;
-            CodecBufferPtr++;
+            set_bit_on_position_in_buffer_to_value(CodecBuffer, BitCount, 1);
+//            *CodecBufferPtr = 0x01;
+//            CodecBufferPtr++;
             BitCount++;
         } else if (!(SampleRegister ^ 0x06)) {
             // We have read a 0
-            *CodecBufferPtr = 0x00;
-            CodecBufferPtr++;
+            set_bit_on_position_in_buffer_to_value(CodecBuffer, BitCount, 0);
+//            *CodecBufferPtr = 0x00;
+//            CodecBufferPtr++;
             BitCount++;
         } else {
 //            ISO14443_F_GARBAGE(); //TODO: Handle this case?
@@ -290,7 +305,7 @@ TRANSMIT_START_LABEL:
     /* Fallthrough */
 TRANSMIT_BIT_LABEL:
     StateRegister = TRANSMIT_BIT;
-    CodecSetLoadmodState(CodecBuffer[BitSent]);
+    CodecSetLoadmodState(get_bit_on_position_in_buffer(CodecBuffer, BitSent));
     CodecStartSubcarrier();
     BitSent++;
     if (BitSent >= BitCount){
@@ -385,7 +400,6 @@ void ISO14443FCodecTask(void) {
 //            // Zaloguj data co odesíláme - TODO: bity jsou jako byty
 //            LogEntry(LOG_INFO_CODEC_TX_DATA, CodecBuffer, AnswerBitCount);
             BitCount = AnswerBitCount;
-            CodecBufferPtr = CodecBuffer;
             CodecSetSubcarrier(CODEC_SUBCARRIERMOD_OOK, ISO14443F_SUBCARRIER_DIVIDER);
             StateRegister = TRANSMIT_START;
         } else {
