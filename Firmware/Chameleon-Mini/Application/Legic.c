@@ -38,6 +38,7 @@ static enum {
 uint16_t LegicAppProcess(uint8_t *Buffer, uint16_t BitCount) {
     uint8_t tmpbf[] = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0};
     //                |                   DATA               |         CRC       |
+   // RIGHT NOW 0x81 0xAB 0xB8 0x4A
     switch(BitCount){
         case 7:
             // Probably start of setup phase
