@@ -9,8 +9,36 @@
 #include "Codec.h"
 #include "Log.h"
 
+// ------------------------ LEGIC PRIME PRNG SECTION -------------------------
+static struct legicPRNG_t {
+    uint8_t a;
+    uint8_t b;
+    size_t step;
+} legicPRNG;
+
+void LegicPrimePRNGInit(uint8_t iv){
+    legicPRNG.a = iv;
+    legicPRNG.b = (iv << 1) | 1;
+    legicPRNG.step = 0;
+}
+void LegicPrimePRNGAdvance(size_t steps){
+    while(steps--){
+        uint8_t new_b_bit = legicPRNG.b ^ (legicPRNG.b >> 2) ^ (legicPRNG.b >> 3) ^ (legicPRNG.b >> 7);
+        legicPRNG.b = (new_b_bit << 7) | (legicPRNG.b >> 1);
+
+        uint8_t new_a_bit = legicPRNG.a ^ (legicPRNG.a >> 6);
+        legicPRNG.a = (new_a_bit << 6) | legicPRNG.a  >> 1;
+    }
+}
+uint8_t LegicPrimePRNGGetBit(){
+    uint8_t index = (legicPRNG.a ^ 0x1C) >> 2; // Flip the bits 2,3 and 4 from a and move them, so they are LSB
+    index = ((index & 4) >> 2) | (index & 2) | ((index & 1) << 2); // Reverse their direction
+    return (legicPRNG.b >> index) & 1; // Select only one bit from b according to index made from a
+}
 
 
+
+// ------------------------ LEGIC CODEC SECTION -------------------------------
 /* Sampling is done using internal clock, synchronized to the field modulation.
  * For that we need to convert the bit rate for the internal clock. */
 // F_CPU = 2 * 13 560 000UL = Speed of the CPU, in Hz

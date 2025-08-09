@@ -17,4 +17,9 @@ void ISO14443FCodecInit(void);
 void ISO14443FCodecDeInit(void);
 void ISO14443FCodecTask(void);
 
+/* LEGIC PRIME PRNG */
+void LegicPrimePRNGInit(uint8_t iv);
+void LegicPrimePRNGAdvance();
+uint8_t LegicPrimePRNGGetBit();
+
 #endif //ISO14443_F_H_
