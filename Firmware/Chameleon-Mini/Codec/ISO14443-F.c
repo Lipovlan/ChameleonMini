@@ -125,7 +125,7 @@ INLINE void ISO14443_F_DEMOD_END(void) {
      * let it count the frame delay time in the background, and generate
      * an interrupt once it has reached the FDT. */
     CODEC_TIMER_LOADMOD.CTRLD = TC_EVACT_OFF_gc;
-    CODEC_TIMER_LOADMOD.PER = 4470; /* +- 330 microseconds */
+    CODEC_TIMER_LOADMOD.PER = 4470; /* +- 330 microseconds */ //TODO: Try 4334 for 320 microseconds as measured on Kaba
     CODEC_TIMER_LOADMOD.INTFLAGS = TC0_OVFIF_bm;
     CODEC_TIMER_LOADMOD.INTCTRLA = TC_OVFINTLVL_HI_gc;
     StateRegister = TRANSMIT_FIRST_DELAY;
