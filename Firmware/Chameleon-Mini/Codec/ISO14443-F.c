@@ -363,7 +363,6 @@ void ISO14443FCodecInit(void) {
     Flags.DemodFinished = 0;
     Flags.LoadmodFinished = 0;
 
-    isr_func_TCD0_CCC_vect = &isr_Reader14443_2A_TCD0_CCC_vect;
     isr_func_CODEC_DEMOD_IN_INT0_VECT = &isr_ISO14443_F_CODEC_DEMOD_IN_INT0_VECT;
     isr_func_CODEC_TIMER_LOADMOD_OVF_VECT = &isr_ISO14443_F_CODEC_TIMER_LOADMOD_OVF_VECT;
     isr_func_CODEC_TIMER_SAMPLING_CCA_vect = &isr_ISO14443_F_CODEC_TIMER_SAMPLING_CCA_VECT;
