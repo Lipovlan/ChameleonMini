@@ -5,6 +5,8 @@
  *      Author: ceres-c
  */
 
+#ifdef CONFIG_ISO15693_SNIFF_SUPPORT
+
 #include "SniffISO15693.h"
 #include "Codec.h"
 #include "../System.h"
@@ -804,3 +806,5 @@ void SniffISO15693CodecTask(void) {
         ReaderSniffInit();
     }
 }
+
+#endif /* CONFIG_ISO15693_SNIFF_SUPPORT */
