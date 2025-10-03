@@ -87,7 +87,7 @@ typedef enum {
 } StateType;
 
 /* Define pseudo variables to use fast register access. This is useful for global vars */
-#define DataRegister	Codec8Reg0
+#define DemodActive	Codec8Reg0
 #define StateRegister	Codec8Reg1
 #define TransmitSynced	Codec8Reg2
 #define SampleIdxRegister Codec8Reg2
@@ -115,11 +115,13 @@ INLINE void ISO14443_F_DEMOD_END(void) {
 
     SampleIdxRegister = 0;
     /* Disable demodulation interrupt */
-    CODEC_TIMER_SAMPLING.CTRLA = TC_CLKSEL_OFF_gc; /* Disconnect system clock from demod timer */
-    CODEC_TIMER_SAMPLING.CTRLD = TC_EVACT_OFF_gc; /* Remove action from timer */
-    CODEC_TIMER_SAMPLING.INTCTRLB = TC_CCAINTLVL_OFF_gc; /* Disable CCA interrupts */
-    CODEC_TIMER_SAMPLING.INTFLAGS = TC0_CCAIF_bm; /* Clear CCA interrupt flag */
-
+    DemodActive = 0;
+    if (DemodActive) {
+        CODEC_TIMER_SAMPLING.CTRLA = TC_CLKSEL_OFF_gc; /* Disconnect system clock from demod timer */
+        CODEC_TIMER_SAMPLING.CTRLD = TC_EVACT_OFF_gc; /* Remove action from timer */
+        CODEC_TIMER_SAMPLING.INTCTRLB = TC_CCAINTLVL_OFF_gc; /* Disable CCA interrupts */
+        CODEC_TIMER_SAMPLING.INTFLAGS = TC0_CCAIF_bm; /* Clear CCA interrupt flag */
+    }
     /* By this time, the LOADMOD timer is aligned to the last modulation
      * edge of the reader. So we disable the auto-synchronization and
      * let it count the frame delay time in the background, and generate
@@ -167,7 +169,7 @@ static void StartDemod(void) {
     /* Activate Power for demodulator */
     CodecSetDemodPower(true);
     ParityBufferPtr = &CodecBuffer[ISO14443A_BUFFER_PARITY_OFFSET];
-    DataRegister = 0;
+    DemodActive = 1;
     SampleRegister = 0;
     SampleIdxRegister = 0;
     BitCount = 0;
@@ -251,47 +253,51 @@ uint8_t get_bit_on_position_in_buffer(const uint8_t * buffer, uint16_t position)
 // if 2 highs and a low are observed, it stores a logical 0 into CodecBuffer
 // if 4 highs and a low are observed, it stores a logical 1 into CodecBuffer
 ISR_SHARED isr_ISO14443_F_CODEC_TIMER_SAMPLING_CCA_VECT(void){
-    SampleIdxRegister++;
+    set_PE0_high();
+    if (DemodActive) {
+        SampleIdxRegister++;
 
-    uint8_t SamplePin = CODEC_DEMOD_IN_PORT.IN & CODEC_DEMOD_IN_MASK;
+        uint8_t SamplePin = CODEC_DEMOD_IN_PORT.IN & CODEC_DEMOD_IN_MASK;
 
-    /* Shift sampled bit into sampling register */
-    // Sample pin očekávám z téhle negace, že mi vrací 1 když naměřil LOW a 0 když naměřil HIGH
+        /* Shift sampled bit into sampling register */
+        // Sample pin očekávám z téhle negace, že mi vrací 1 když naměřil LOW a 0 když naměřil HIGH
 
-    SampleRegister = (SampleRegister << 1) | (!SamplePin ? 0x01 : 0x00);
+        SampleRegister = (SampleRegister << 1) | (!SamplePin ? 0x01 : 0x00);
 
-    if (SampleIdxRegister > 5){
-        // No more bits to be read or an error occurred during transmission as 4x HIGH should not happen
-        /* No carrier modulation for 3 sample points. EOC! */
-       ISO14443_F_DEMOD_END();
-    }
+        if (SampleIdxRegister > 5) {
+            // No more bits to be read or an error occurred during transmission as 4x HIGH should not happen
+            /* No carrier modulation for 3 sample points. EOC! */
+            ISO14443_F_DEMOD_END();
+        }
 
-    if (!(SampleRegister & 0x1)){ // if last read bit is a zero
-        if (!(SampleRegister ^ 0x1E)) {
-            // We have read a 1
-            set_bit_on_position_in_buffer_to_value(CodecBuffer, BitCount, 1);
+        if (!(SampleRegister & 0x1)) { // if last read bit is a zero
+            if (!(SampleRegister ^ 0x1E)) {
+                // We have read a 1
+                set_bit_on_position_in_buffer_to_value(CodecBuffer, BitCount, 1);
 //            *CodecBufferPtr = 0x01;
 //            CodecBufferPtr++;
-            BitCount++;
-        } else if (!(SampleRegister ^ 0x06)) {
-            // We have read a 0
-            set_bit_on_position_in_buffer_to_value(CodecBuffer, BitCount, 0);
+                BitCount++;
+            } else if (!(SampleRegister ^ 0x06)) {
+                // We have read a 0
+                set_bit_on_position_in_buffer_to_value(CodecBuffer, BitCount, 0);
 //            *CodecBufferPtr = 0x00;
 //            CodecBufferPtr++;
-            BitCount++;
-        } else {
+                BitCount++;
+            } else {
 //            ISO14443_F_GARBAGE(); //TODO: Handle this case?
+            }
+            SampleRegister = 0;
+            SampleIdxRegister = 0;
         }
-        SampleRegister = 0;
-        SampleIdxRegister = 0;
+
+
+        /* Make sure the sampling timer gets automatically aligned to the
+         * modulation pauses by using the RESTART event.
+         * This can be understood as a "poor man's phase locked loop" and makes sure that we are
+         * never too far out the bit-grid while sampling. */
+        CODEC_TIMER_SAMPLING.CTRLD = TC_EVACT_RESTART_gc | CODEC_TIMER_MODEND_EVSEL;
     }
-
-
-    /* Make sure the sampling timer gets automatically aligned to the
-     * modulation pauses by using the RESTART event.
-     * This can be understood as a "poor man's phase locked loop" and makes sure that we are
-     * never too far out the bit-grid while sampling. */
-    CODEC_TIMER_SAMPLING.CTRLD = TC_EVACT_RESTART_gc | CODEC_TIMER_MODEND_EVSEL;
+    set_PE0_low();
 }
 
 // Modulate as a card to send card response
@@ -342,7 +348,7 @@ TRANSMIT_BIT_LABEL:
     return;
 
 TRANSMIT_END_LABEL:
-    set_PE0_high();
+//    set_PE0_high();
 
 //    TerminalSendString("Transmit label end \r\n");
     StateRegister = TRANSMIT_NONE;
@@ -350,7 +356,7 @@ TRANSMIT_END_LABEL:
     CodecSetSubcarrier(CODEC_SUBCARRIERMOD_OFF, ISO14443F_SUBCARRIER_DIVIDER);
 
     disable_loadmod_timer();
-    set_PE0_low();
+//    set_PE0_low();
     Flags.LoadmodFinished = 1;
     return;
 
@@ -362,6 +368,7 @@ void ISO14443FCodecInit(void) {
     /* Initialize some global vars and start looking out for reader commands */
     Flags.DemodFinished = 0;
     Flags.LoadmodFinished = 0;
+    DemodActive = 0;
 
     isr_func_CODEC_DEMOD_IN_INT0_VECT = &isr_ISO14443_F_CODEC_DEMOD_IN_INT0_VECT;
     isr_func_CODEC_TIMER_LOADMOD_OVF_VECT = &isr_ISO14443_F_CODEC_TIMER_LOADMOD_OVF_VECT;
@@ -378,6 +385,7 @@ void ISO14443FCodecDeInit(void) {
 
     Flags.DemodFinished = 0;
     Flags.LoadmodFinished = 0;
+    DemodActive = 0;
 
     CODEC_TIMER_SAMPLING.CTRLA = TC_CLKSEL_OFF_gc;
     CODEC_TIMER_SAMPLING.CTRLD = TC_EVACT_OFF_gc;
@@ -399,18 +407,6 @@ void ISO14443FCodecDeInit(void) {
 void ISO14443FCodecTask(void) {
 
     if (Flags.DemodFinished) {
-        // Reset demod flag so we can demod again
-        Flags.DemodFinished = 0;
-
-        // Pošli dekódovaná data na sériovou linku
-//        TerminalSendString("Data sampled: ");
-//        uint8_t *bufind = CodecBuffer;
-//        while (bufind != CodecBufferPtr) {
-//            char c[10];
-//            sprintf(c, "%x ", *bufind);
-//            TerminalSendString(c);
-//            bufind++;
-//        }
         // Zablikej, že jsme přijali data
         LEDHook(LED_CODEC_RX, LED_PULSE);
         // Zaloguj přijatá data - TODO: bity ukládáme jako byty
@@ -419,7 +415,6 @@ void ISO14443FCodecTask(void) {
         uint16_t AnswerBitCount;
         // Zavolej aplikační vrstvu
         AnswerBitCount = ApplicationProcess(CodecBuffer, BitCount);
-
 
         if (AnswerBitCount != ISO14443F_APP_NO_RESPONSE) {
 //            // Zablikej, že vysíláme
@@ -434,6 +429,8 @@ void ISO14443FCodecTask(void) {
             disable_loadmod_timer();
             StartDemod();
         }
+        // Reset demod flag so we can demod again
+        Flags.DemodFinished = 0;
     }
 
     if (Flags.LoadmodFinished) {
