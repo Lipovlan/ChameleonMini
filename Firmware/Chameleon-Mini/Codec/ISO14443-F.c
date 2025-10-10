@@ -79,16 +79,22 @@ static volatile struct {
 } Flags = { 0 };
 
 typedef enum {
+    RECEIVE_NONE,
+    RECEIVE_SOME,
+    RECEIVE_END
+} ReceiveStateType;
+
+typedef enum {
     TRANSMIT_FIRST_DELAY,
     TRANSMIT_NONE,
     TRANSMIT_START,
     TRANSMIT_BIT,
     TRANSMIT_END
-} StateType;
+} TransmitStateType;
 
 /* Define pseudo variables to use fast register access. This is useful for global vars */
-#define DemodActive	Codec8Reg0
-#define StateRegister	Codec8Reg1
+#define ReceiveStateRegister	Codec8Reg0
+#define TransmitStateRegister	Codec8Reg1
 #define TransmitSynced	Codec8Reg2
 #define SampleIdxRegister Codec8Reg2
 #define SampleRegister	Codec8Reg3
@@ -115,7 +121,7 @@ INLINE void ISO14443_F_DEMOD_END(void) {
 
     SampleIdxRegister = 0;
     /* Disable demodulation interrupt */
-    DemodActive = 0;
+    ReceiveStateRegister = 0;
     if (0) {
         CODEC_TIMER_SAMPLING.CTRLA = TC_CLKSEL_OFF_gc; /* Disconnect system clock from demod timer */
         CODEC_TIMER_SAMPLING.CTRLD = TC_EVACT_OFF_gc; /* Remove action from timer */
@@ -130,7 +136,7 @@ INLINE void ISO14443_F_DEMOD_END(void) {
     CODEC_TIMER_LOADMOD.PER = 4470; /* +- 330 microseconds */ //TODO: Try 4334 for 320 microseconds as measured on Kaba
     CODEC_TIMER_LOADMOD.INTFLAGS = TC0_OVFIF_bm;
     CODEC_TIMER_LOADMOD.INTCTRLA = TC_OVFINTLVL_HI_gc;
-    StateRegister = TRANSMIT_FIRST_DELAY;
+    TransmitStateRegister = TRANSMIT_FIRST_DELAY;
     TransmitSynced = 0;
     Flags.DemodFinished = 1;
 
@@ -169,11 +175,11 @@ static void StartDemod(void) {
     /* Activate Power for demodulator */
     CodecSetDemodPower(true);
     ParityBufferPtr = &CodecBuffer[ISO14443A_BUFFER_PARITY_OFFSET];
-    DemodActive = 1;
+    ReceiveStateRegister = 1;
     SampleRegister = 0;
     SampleIdxRegister = 0;
     BitCount = 0;
-//    StateRegister = TRANSMIT_NONE;
+//    TransmitStateRegister = TRANSMIT_NONE;
 
     /* Configure sampling-timer free running and sync to first modulation-pause. */
     CODEC_TIMER_SAMPLING.CNT = 0; /* Reset the timer's initial value*/
@@ -289,7 +295,7 @@ void demodulate_reader_bit(void){
 
 //This triggers every 20us
 ISR_SHARED isr_ISO14443_F_CODEC_TIMER_SAMPLING_CCA_VECT(void){
-    if (DemodActive) {
+    if (ReceiveStateRegister) {
         /* Tohle funguje hezky, neměnit*/
         demodulate_reader_bit();
         /* Make sure the sampling timer gets automatically aligned to the
@@ -312,8 +318,8 @@ ISR_SHARED isr_ISO14443_F_CODEC_TIMER_LOADMOD_OVF_VECT(void) {
     };
 
     //TODO: Přidej label ochranu
-    if ((StateRegister >= TRANSMIT_FIRST_DELAY) && (StateRegister <= TRANSMIT_END)) {
-        goto *JumpTable[StateRegister];
+    if ((TransmitStateRegister >= TRANSMIT_FIRST_DELAY) && (TransmitStateRegister <= TRANSMIT_END)) {
+        goto *JumpTable[TransmitStateRegister];
     } else {
         TerminalSendString("ERROR: Jump to unregistered label!\r\n");
         return;
@@ -329,22 +335,22 @@ TRANSMIT_FIRST_DELAY_LABEL:
     TransmitSynced = 1;
 
     /* If we got here from the start label return back to it */
-    if (StateRegister == TRANSMIT_START){goto TRANSMIT_START_LABEL;}
+    if (TransmitStateRegister == TRANSMIT_START){goto TRANSMIT_START_LABEL;}
     return;
 
 TRANSMIT_START_LABEL:
     /* If the application layer is too fast, we get to this label before frame delay label*/
     if (!TransmitSynced){goto TRANSMIT_FIRST_DELAY_LABEL;}
-    StateRegister = TRANSMIT_BIT;
+    TransmitStateRegister = TRANSMIT_BIT;
     BitSent = 0;
     /* Fallthrough */
 TRANSMIT_BIT_LABEL:
-    StateRegister = TRANSMIT_BIT;
+    TransmitStateRegister = TRANSMIT_BIT;
     CodecSetLoadmodState(get_bit_on_position_in_buffer(CodecBuffer, BitSent));
     CodecStartSubcarrier();
     BitSent++;
     if (BitSent >= BitCount){
-        StateRegister = TRANSMIT_END;
+        TransmitStateRegister = TRANSMIT_END;
     }
     return;
 
@@ -352,7 +358,7 @@ TRANSMIT_END_LABEL:
 //    set_PE0_high();
 
 //    TerminalSendString("Transmit label end \r\n");
-    StateRegister = TRANSMIT_NONE;
+    TransmitStateRegister = TRANSMIT_NONE;
     CodecSetLoadmodState(false);
     CodecSetSubcarrier(CODEC_SUBCARRIERMOD_OFF, ISO14443F_SUBCARRIER_DIVIDER);
 
@@ -369,7 +375,7 @@ void ISO14443FCodecInit(void) {
     /* Initialize some global vars and start looking out for reader commands */
     Flags.DemodFinished = 0;
     Flags.LoadmodFinished = 0;
-    DemodActive = 0;
+    ReceiveStateRegister = 0;
 
     isr_func_CODEC_DEMOD_IN_INT0_VECT = &isr_ISO14443_F_CODEC_DEMOD_IN_INT0_VECT;
     isr_func_CODEC_TIMER_LOADMOD_OVF_VECT = &isr_ISO14443_F_CODEC_TIMER_LOADMOD_OVF_VECT;
@@ -386,7 +392,7 @@ void ISO14443FCodecDeInit(void) {
 
     Flags.DemodFinished = 0;
     Flags.LoadmodFinished = 0;
-    DemodActive = 0;
+    ReceiveStateRegister = 0;
 
     CODEC_TIMER_SAMPLING.CTRLA = TC_CLKSEL_OFF_gc;
     CODEC_TIMER_SAMPLING.CTRLD = TC_EVACT_OFF_gc;
@@ -426,7 +432,7 @@ void ISO14443FCodecTask(void) {
 //            LogEntry(LOG_INFO_CODEC_TX_DATA, CodecBuffer, AnswerBitCount);
             BitCount = AnswerBitCount;
             CodecSetSubcarrier(CODEC_SUBCARRIERMOD_OOK, ISO14443F_SUBCARRIER_DIVIDER);
-            StateRegister = TRANSMIT_START;
+            TransmitStateRegister = TRANSMIT_START;
         } else {
             /* No data to be processed. Disable loadmodding and start listening again */
             disable_loadmod_timer();
