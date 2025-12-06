@@ -208,7 +208,7 @@ SRC         +=  Terminal/Terminal.c \
 		Terminal/CommandLine.c
 SRC         +=  Codec/Codec.c \
 		Codec/ISO14443-2A.c \
-		Codec/ISO14443-F.c \
+		Codec/ISO14443-2F.c \
 		Codec/Reader14443-2A.c \
 		Codec/SniffISO14443-2A.c \
 		Codec/Reader14443-ISR.S \
