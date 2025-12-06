@@ -52,22 +52,22 @@ uint8_t LegicPrimePRNGGetBit(){
 // and 0 is composited of 40us of HIGH and 20us of LOW which takes 60us in total.
 // GCD of 100 and 60 is 20, so we need to measure every 20us to be sure we are synced.
 // Thus, every time we measure LOW, we'll look into our memory and if we encountered
-// 4 HIGHs before, we have just received a 1 or if we read just 3 HIGHs, we have received a 0.
+// 4 HIGHs before, we have just received a 1 or if we read just 2 HIGHs, we have received a 0.
 // So effectively we need to sample each 20us which makes our bitrate 50 kbps
 // which in turn makes our BIT_RATE_CYCLES 542 (.4)
 //
 //
 // v |
 // o |
-// l |          1                 0                   1                        0
-// t |  +----------------+    +--------+    +--*----*----*----*--+  L  +--*----*----*--+  L
-// a |  |                |    |        |    |  *    *    *    *  |  *  |  *    *    *  |  *
-// g |  |                |    |        |    |  *    *    *    *  |  *  |  *    *    *  |  *
-// e |  |                +----+        +----+  H    H    H    H  +--*--+  H    H    H  +--*--
+// l |          1                 0                   1                     0
+// t |  +----------------+    +--------+    +--*----*----*----*--+  L  +--*----*--+  L
+// a |  |                |    |        |    |  *    *    *    *  |  *  |  *    *  |  *
+// g |  |                |    |        |    |  *    *    *    *  |  *  |  *    *  |  *
+// e |  |                +----+        +----+  H    H    H    H  +--*--+  H    H  +--*--
 //   +-------------------------------------------------------------------------------------------- time
 //
-// a dash takes 10us, stars symbolise a measurement that should be every 20us
-// we decode HHHHL as 1 and HHHL as 0
+// a dash takes 5us, stars symbolise a measurement that should be every 20us
+// we decode HHHHL as 1 and HHL as 0
 
 #define SAMPLE_RATE_IN_SYSTEM_CYCLES		((uint16_t) (((uint64_t) F_CPU * ISO14443F_BIT_RATE_CYCLES) / CODEC_CARRIER_FREQ) )
 #define TRANSMIT_RATE_IN_SYSTEM_CYCLES  1361
