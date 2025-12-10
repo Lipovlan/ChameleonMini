@@ -22,8 +22,8 @@ typedef enum  {
     /* This HAS to be the first element */
     CONFIG_NONE = 0,
 
-#ifdef CONFIG_LEGIC_SUPPORT
-    CONFIG_LEGIC,
+#ifdef CONFIG_LEGIC_PRIME_SUPPORT
+    CONFIG_LEGIC_PRIME,
 #endif
 #ifdef CONFIG_MF_ULTRALIGHT_SUPPORT
     CONFIG_MF_ULTRALIGHT,

@@ -15,7 +15,7 @@
 /* Applications */
 #include "MifareUltralight.h"
 #include "MifareClassic.h"
-#include "Legic.h"
+#include "LegicPrime.h"
 #include "Reader14443A.h"
 #include "Vicinity.h"
 #include "Sl2s2002.h"

@@ -1,9 +1,9 @@
 //
 // Created by l on 6.8.24.
 //
-#if defined(CONFIG_LEGIC_SUPPORT)
+#if defined(CONFIG_LEGIC_PRIME_SUPPORT)
 
-#include "Legic.h"
+#include "LegicPrime.h"
 
 char legic_log_str[64];
 
@@ -34,6 +34,7 @@ static enum {
 } State;
 
 
+uint16_t LegicPrimeAppProcess(uint8_t *Buffer, uint16_t BitCount) {
 
 uint16_t LegicAppProcess(uint8_t *Buffer, uint16_t BitCount) {
     uint8_t tmpbf[] = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0};
@@ -66,7 +67,6 @@ uint16_t LegicAppProcess(uint8_t *Buffer, uint16_t BitCount) {
                     tmpbf[0] = 0x52; tmpbf[1] = 0x3; response_index++; break;
             }
 
-
             memcpy(CodecBuffer, tmpbf, 2);
             return 12;
         default:
@@ -74,7 +74,7 @@ uint16_t LegicAppProcess(uint8_t *Buffer, uint16_t BitCount) {
     }
 }
 
-void LegicGetUid(ConfigurationUidType Uid) {
+void LegicPrimeGetUid(ConfigurationUidType Uid) {
     sprintf(legic_log_str, "LEGIC GET UID");
     LogEntry(LOG_INFO_GENERIC, legic_log_str, strlen(legic_log_str));
     Uid[0] = 0xAA;
@@ -83,19 +83,18 @@ void LegicGetUid(ConfigurationUidType Uid) {
     Uid[3] = 0xDD;
 }
 
-void LegicSetUid(ConfigurationUidType Uid) {
+void LegicPrimeSetUid(ConfigurationUidType Uid) {
     sprintf(legic_log_str, "LEGIC SET UID");
     LogEntry(LOG_INFO_GENERIC, legic_log_str, strlen(legic_log_str));
 }
-void LegicAppInit(void) {
+void LegicPrimeAppInit(void) {
     response_index = 0;
     sprintf(legic_log_str, "LEGIC APP INIT");
     LogEntry(LOG_INFO_GENERIC, legic_log_str, strlen(legic_log_str));
-
     State = STATE_IDLE;
 }
 
-void LegicAppReset(void) {
+void LegicPrimeAppReset(void) {
     response_index = 0;
     State = STATE_IDLE;
 }
