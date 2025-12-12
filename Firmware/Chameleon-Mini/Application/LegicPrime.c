@@ -15,6 +15,13 @@ char legic_log_str[64];
 #include "Crypto1.h"
 #include "../Random.h"
 
+#define MEM_UID_ADDRESS         0x00
+#define MEM_UID_CRC_ADDRESS     0x04
+#define MEM_DCF_LOW_ADDRESS     0x05
+#define MEM_DCF_HIGH_ADDRESS    0x06
+#define MEM_BACKUP_ADDRESS      0x0D
+#define MEM_BACKUP_CRC_ADDRESS  0x13
+
 uint8_t response_index;
 
 static enum {
@@ -77,14 +84,13 @@ uint16_t LegicAppProcess(uint8_t *Buffer, uint16_t BitCount) {
 void LegicPrimeGetUid(ConfigurationUidType Uid) {
     sprintf(legic_log_str, "LEGIC GET UID");
     LogEntry(LOG_INFO_GENERIC, legic_log_str, strlen(legic_log_str));
-    Uid[0] = 0xAA;
-    Uid[1] = 0xBB;
-    Uid[2] = 0xCC;
-    Uid[3] = 0xDD;
+    MemoryReadBlock(Uid, MEM_UID_ADDRESS, LEGIC_PRIME_UID_SIZE);
 }
 
 void LegicPrimeSetUid(ConfigurationUidType Uid) {
     sprintf(legic_log_str, "LEGIC SET UID");
+    MemoryWriteBlock(Uid, MEM_UID_ADDRESS, LEGIC_PRIME_UID_SIZE);
+    //TODO: Write also the LEGIC prime UID CRC to MEM_UID_CRC_ADDRESS
     LogEntry(LOG_INFO_GENERIC, legic_log_str, strlen(legic_log_str));
 }
 void LegicPrimeAppInit(void) {
