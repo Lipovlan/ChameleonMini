@@ -46,11 +46,15 @@ uint16_t LegicPrimeAppProcess(uint8_t *Buffer, uint16_t BitCount) {
 uint16_t LegicAppProcess(uint8_t *Buffer, uint16_t BitCount) {
     uint8_t tmpbf[] = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0};
     //                |                   DATA               |         CRC       |
-   // RIGHT NOW 0x81 0xAB 0xB8 0x4A
+    // RIGHT NOW 0x57 0x46 0x5f 0x85
+    // OLD 0x81 0xAB 0xB8 0x4A
     switch(BitCount){
+        case 0:
+            return ISO14443F_APP_NO_RESPONSE;
         case 7:
             // Probably start of setup phase
-            tmpbf[0] = 0x19;
+            tmpbf[0] = 0x39;
+//            tmpbf[0] = 0x19;
             memcpy(CodecBuffer, tmpbf, 1);
             return 6;
         case 6:
@@ -63,15 +67,22 @@ uint16_t LegicAppProcess(uint8_t *Buffer, uint16_t BitCount) {
             // Probably reading MIM1024 card
             switch(response_index){
                 case 0:
-                    tmpbf[0] = 0x27; tmpbf[1] = 0xB; response_index++; break;
+                    tmpbf[0] = 0x3e; tmpbf[1] = 0x5; response_index++; break;
+//                    tmpbf[0] = 0x27; tmpbf[1] = 0xB; response_index++; break;
                 case 1:
-                    tmpbf[0] = 0x9B; tmpbf[1] = 0x1; response_index++; break;
+                    tmpbf[0] = 0x45; tmpbf[1] = 0x5; response_index++; break;
+//                    tmpbf[0] = 0x9B; tmpbf[1] = 0x1; response_index++; break;
                 case 2:
-                    tmpbf[0] = 0xA1; tmpbf[1] = 0x1; response_index++; break;
-                case 3:
-                    tmpbf[0] = 0x6D; tmpbf[1] = 0xA; response_index++; break;
-                case 4:
-                    tmpbf[0] = 0x52; tmpbf[1] = 0x3; response_index++; break;
+                    tmpbf[0] = 0xfb; tmpbf[1] = 0x2; response_index++; break;
+//                    tmpbf[0] = 0xA1; tmpbf[1] = 0x1; response_index++; break;
+                 case 3:
+                    tmpbf[0] = 0x41; tmpbf[1] = 0x0; response_index++; break;
+//                    tmpbf[0] = 0x6D; tmpbf[1] = 0xA; response_index++; break;
+                    case 4:
+                    tmpbf[0] = 0xAC; tmpbf[1] = 0xC; response_index++; break;
+//                    tmpbf[0] = 0x52; tmpbf[1] = 0x3; response_index++; break;
+                default:
+//                    TerminalSendString("Legic APP Processing too high response index\r\n");
             }
 
             memcpy(CodecBuffer, tmpbf, 2);
