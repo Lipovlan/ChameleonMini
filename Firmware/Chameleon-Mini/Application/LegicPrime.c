@@ -85,13 +85,16 @@ uint16_t LegicPrimeAppProcess(uint8_t *Buffer, uint16_t BitCount) {
                     response_index++;
                     break;
                 default:
-//                    TerminalSendString("Legic APP Processing too high response index\r\n");
+                    sprintf(legic_log_str, "Legic APP Processing response index that is too high");
+                    LogEntry(LOG_INFO_GENERIC, legic_log_str, strlen(legic_log_str));
                     return ISO14443F_APP_NO_RESPONSE;
             }
 
             memcpy(Buffer, tmpbf, 2);
             return 12;
         default:
+            sprintf(legic_log_str, "Legic APP Processing unknown response");
+            LogEntry(LOG_INFO_GENERIC, legic_log_str, strlen(legic_log_str));
             return ISO14443F_APP_NO_RESPONSE; //TODO: die horribly here?
     }
 }

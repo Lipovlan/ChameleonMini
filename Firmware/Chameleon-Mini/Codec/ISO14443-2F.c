@@ -140,6 +140,11 @@ INLINE void ISO14443_F_DEMOD_END(void) {
     TransmitStateRegister = TRANSMIT_FIRST_DELAY;
     TransmitSynced = 0;
     ReceiveStateRegister = END_RECEIVE;
+    //Zero out unused bytes for logging
+    for (uint16_t i = 0; i < (BitCount % 8); i++){
+        CodecBuffer[(BitCount + 7) / 8] &= ~(1u << i);
+    }
+    LogEntry(LOG_INFO_CODEC_RX_DATA, CodecBuffer, (BitCount+7)/8 );
 }
 
 /* Funkce které vyčistí nastavení po tom co demodulujeme bordel */
@@ -426,7 +431,7 @@ void ISO14443FCodecTask(void) {
         if (AnswerBitCount != ISO14443F_APP_NO_RESPONSE) {
             ReceiveStateRegister = DONT_RECEIVE;
             // Zaloguj data co odesíláme - TODO: bity jsou jako byty
-            LogEntry(LOG_INFO_CODEC_TX_DATA, CodecBuffer, AnswerBitCount);
+            LogEntry(LOG_INFO_CODEC_TX_DATA, CodecBuffer, (AnswerBitCount + 7) / 8);
             BitCount = AnswerBitCount;
             CodecSetSubcarrier(CODEC_SUBCARRIERMOD_OOK, ISO14443F_SUBCARRIER_DIVIDER);
             TransmitStateRegister = TRANSMIT_START;
