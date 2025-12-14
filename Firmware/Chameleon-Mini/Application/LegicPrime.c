@@ -56,6 +56,7 @@ uint16_t LegicAppProcess(uint8_t *Buffer, uint16_t BitCount) {
             tmpbf[0] = 0x39;
 //            tmpbf[0] = 0x19;
             memcpy(CodecBuffer, tmpbf, 1);
+            memcpy(Buffer, tmpbf, 1);
             return 6;
         case 6:
             // Probably end of setup phase
@@ -85,7 +86,7 @@ uint16_t LegicAppProcess(uint8_t *Buffer, uint16_t BitCount) {
 //                    TerminalSendString("Legic APP Processing too high response index\r\n");
             }
 
-            memcpy(CodecBuffer, tmpbf, 2);
+            memcpy(Buffer, tmpbf, 2);
             return 12;
         default:
             return ISO14443F_APP_NO_RESPONSE; //TODO: die horribly here?
