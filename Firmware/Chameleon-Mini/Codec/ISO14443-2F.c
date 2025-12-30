@@ -43,7 +43,7 @@ uint8_t LegicPrimePRNGGetBit(){
  * For that we need to convert the bit rate for the internal clock. */
 // F_CPU = 2 * 13 560 000UL = Speed of the CPU, in Hz
 // CODEC_CARRIER_FREQ = 13 560 000
-// SAMPLE_RATE_IN_SYSTEM_CYCLES = (2 * 13 560 000 * ISO14443F_BIT_RATE_CYCLES) / 13 560 000 = 2 * ISO14443F_BIT_RATE_CYCLES
+// READER_SIGNAL_SAMPLE_RATE_IN_SYSTEM_CYCLES = (2 * 13 560 000 * ISO14443F_BIT_RATE_CYCLES) / 13 560 000 = 2 * ISO14443F_BIT_RATE_CYCLES
 
 // Our "Bitrate in cycles" is F_CPU / bitrate
 // But our "bitrate" is variable. Received bit 1 takes 80us HIGH and a bit 0 takes 40us HIGH.
@@ -57,19 +57,19 @@ uint8_t LegicPrimePRNGGetBit(){
 // which in turn makes our BIT_RATE_CYCLES 542 (.4)
 //
 //
-// v |
+// v ^
 // o |
 // l |          1                 0                   1                     0
 // t |  +----------------+    +--------+    +--*----*----*----*--+  L  +--*----*--+  L
 // a |  |                |    |        |    |  *    *    *    *  |  *  |  *    *  |  *
 // g |  |                |    |        |    |  *    *    *    *  |  *  |  *    *  |  *
 // e |  |                +----+        +----+  H    H    H    H  +--*--+  H    H  +--*--
-//   +-------------------------------------------------------------------------------------------- time
+//   +-------------------------------------------------------------------------------------------> time
 //
 // a dash takes 5us, stars symbolise a measurement that should be every 20us
 // we decode HHHHL as 1 and HHL as 0
 
-#define SAMPLE_RATE_IN_SYSTEM_CYCLES		((uint16_t) (((uint64_t) F_CPU * ISO14443F_BIT_RATE_CYCLES) / CODEC_CARRIER_FREQ) )
+#define READER_SIGNAL_SAMPLE_RATE_IN_SYSTEM_CYCLES		((uint16_t) (((uint64_t) F_CPU * ISO14443F_BIT_RATE_CYCLES) / CODEC_CARRIER_FREQ) )
 #define TRANSMIT_RATE_IN_SYSTEM_CYCLES  1361
 #define ISO14443A_MIN_BITS_PER_FRAME		7
 
@@ -185,26 +185,36 @@ static void StartDemod(void) {
 //    TransmitStateRegister = TRANSMIT_NONE;
 
     /* Configure sampling-timer free running and sync to first modulation-pause. */
+    /* CodecInitCommon(); sets Event channel 0 to signal the beginning (rising edge) of a modulation pause and Event channel 1 to
+     * signal the end (falling edge) of a modulation pause. */
     CODEC_TIMER_SAMPLING.CNT = 0; /* Reset the timer's initial value*/
-    CODEC_TIMER_SAMPLING.PER = SAMPLE_RATE_IN_SYSTEM_CYCLES - 1; /* Set the timer's period one smaller because PER is 0-based*/
+    CODEC_TIMER_SAMPLING.PER = READER_SIGNAL_SAMPLE_RATE_IN_SYSTEM_CYCLES - 1; /* Set the timer's period one smaller because PER is 0-based*/
     CODEC_TIMER_SAMPLING.CTRLA = TC_CLKSEL_DIV1_gc;  /* Select the system clock (with no prescaler) as the timer source */
     /* Set up  timer's action/delay/source:
      *   - Event Action: Restart waveform period (set CNT to zero, direction to addition and clear all timer outputs)
      *   - Event Delay: None
-     *   - Event Source Select: Trigger on CODEC_TIMER_MODSTART_EVSEL = TC_EVSEL_CH0_gc = Event Channel 0 */
+     *   - Event Source Select: Trigger on a start of a modulation pause (Event on Event channel 0) */
     CODEC_TIMER_SAMPLING.CTRLD = TC_EVACT_RESTART_gc | CODEC_TIMER_MODSTART_EVSEL;
 
     /* Temporarily disable Compare Channel A (CCA) interrupts.
-     * They'll be enabled later in isr_ISO14443_F_CODEC_DEMOD_IN_INT0_VECT once we sensed the reader is sending data and we're in sync with the pulses */
+     * They'll be enabled later in isr_ISO14443_F_CODEC_DEMOD_IN_INT0_VECT once we sensed the reader is sending data, and we're in sync with the pulses */
     CODEC_TIMER_SAMPLING.INTCTRLB = TC_CCAINTLVL_HI_gc;
     CODEC_TIMER_SAMPLING.INTFLAGS = TC0_CCAIF_bm; /* Clear CCA interrupt flag */
     CODEC_TIMER_SAMPLING.CCA = 0xFFFF; /* Disable CCA interrupt */
 
     /* Start looking out for modulation pause via interrupt. */
-    /* Clear the interrupt flag on the port */
-    CODEC_DEMOD_IN_PORT.INTFLAGS = PORT_INT0IF_bm;
-    /* Set pin 1 as source for interrupt 0*/
+    CODEC_DEMOD_IN_PORT.INTFLAGS = PORT_INT0IF_bm; /* Clear the Interrupt 0 flag on the DEMOD port (Port B) */
+    /* Set Pin 1 as source for Interrupt 0 on the DEMOD port (Port B) */
     CODEC_DEMOD_IN_PORT.INT0MASK = CODEC_DEMOD_IN_MASK0;
+
+// v ^                          Trigger here
+// o |                                |
+// l |     Reader charging card       V            1                 0
+// t |--------------------------------|    +----------------+    +--------+
+// a |                                |    |                |    |        |
+// g |                                |    |                |    |        |
+// e |                                |----|                +----+        +-----
+//   +-------------------------------------------------------------------------------------------> time
 }
 
 /* This handles the interrupt raised after first event on the DEMOD pin
@@ -213,7 +223,7 @@ ISR_SHARED isr_ISO14443_F_CODEC_DEMOD_IN_INT0_VECT(void) {
     /* Enable timer for demodulation */
     CODEC_TIMER_SAMPLING.INTFLAGS = TC0_CCAIF_bm; /* Clear CCA interrupt flag */
     CODEC_TIMER_SAMPLING.INTCTRLB = TC_CCAINTLVL_HI_gc; /* Re-enable CCA interrupts */
-    CODEC_TIMER_SAMPLING.CCABUF = SAMPLE_RATE_IN_SYSTEM_CYCLES / 2 ;
+    CODEC_TIMER_SAMPLING.CCABUF = READER_SIGNAL_SAMPLE_RATE_IN_SYSTEM_CYCLES / 2 ;
 
     /* Enable loadmodulation interrupt */
     /* Setup Frame Delay Timer and wire to EVSYS. Frame delay time is
@@ -308,6 +318,14 @@ ISR_SHARED isr_ISO14443_F_CODEC_TIMER_SAMPLING_CCA_VECT(void){
          * modulation pauses by using the RESTART event.
          * This can be understood as a "poor man's phase locked loop" and makes sure that we are
          * never too far out the bit-grid while sampling. */
+        // v ^              Reset here            Reset here     Reset here
+        // o |                   |                     |              |
+        // l |                   V                     V              V
+        // t |--------------|    +----------------+    +--------+     +-
+        // a |              |    |                |    |        |     |
+        // g |              |    |                |    |        |     |
+        // e |              |----|                +----+        +-----+
+        //   +------------------------------------------------------------> time
         CODEC_TIMER_SAMPLING.CTRLD = TC_EVACT_RESTART_gc | CODEC_TIMER_MODEND_EVSEL;
     }
     set_PE0_low();
