@@ -22,8 +22,7 @@ char legic_log_str[64];
 #define MEM_BACKUP_ADDRESS      0x0D
 #define MEM_BACKUP_CRC_ADDRESS  0x13
 
-#define MEM_REPLAY_ADDRESS_1      0x1000
-#define MEM_REPLAY_ADDRESS_2      0x1800
+#define MEM_REPLAY_ADDRESS      0x1000
 
 /* LEGIC prime card layout
  * UID [4 Bytes]
@@ -64,7 +63,7 @@ uint16_t LegicPrimeAppProcess(uint8_t *Buffer, uint16_t BitCount) {
             return ISO14443F_APP_NO_RESPONSE;
         case 7:
             // Probably start of setup phase
-            MemoryReadBlock(tmpbf, MEM_REPLAY_ADDRESS_1, 1);
+            MemoryReadBlock(tmpbf, MEM_REPLAY_ADDRESS, 1);
             memcpy(Buffer, tmpbf, 1);
             return 6;
         case 6:
@@ -81,7 +80,7 @@ uint16_t LegicPrimeAppProcess(uint8_t *Buffer, uint16_t BitCount) {
                 case 2:
                 case 3:
                 case 4:
-                    MemoryReadBlock(tmpbf, MEM_REPLAY_ADDRESS_1 + 1  + (response_index * 2), 2);
+                    MemoryReadBlock(tmpbf, MEM_REPLAY_ADDRESS + 1  + (response_index * 2), 2);
                     response_index++;
                     break;
                 default:
@@ -120,10 +119,10 @@ void LegicPrimeAppInit(void) {
     // Prepare some captured communication beforehand TODO: remove this and use a terminal command to store them
     // Card ID: 0x57 0x46 0x5f 0x85
     uint8_t capture1[] =  {0x39, 0x3e, 0x5, 0x45, 0x5, 0xfb, 0x2, 0x41, 0x0, 0xac, 0xc};
-    MemoryWriteBlock(capture1, MEM_REPLAY_ADDRESS_1, 11);
+    MemoryWriteBlock(capture1, MEM_REPLAY_ADDRESS, 11);
     // Card ID: 0x81 0xAB 0xB8 0x4A
-    uint8_t capture2[] = {0x19, 0x27, 0xb, 0x9b, 0x1, 0xa1, 0x1, 0x6d, 0xa, 0x52, 0x3};
-    MemoryWriteBlock(capture2, MEM_REPLAY_ADDRESS_2, 11);
+//    uint8_t capture2[] = {0x19, 0x27, 0xb, 0x9b, 0x1, 0xa1, 0x1, 0x6d, 0xa, 0x52, 0x3};
+//    MemoryWriteBlock(capture2, MEM_REPLAY_ADDRESS_2, 11);
 }
 
 void LegicPrimeAppReset(void) {
