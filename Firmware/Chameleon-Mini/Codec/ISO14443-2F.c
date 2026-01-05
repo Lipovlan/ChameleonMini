@@ -1,6 +1,10 @@
-//
-// Created by l on 7/5/24.
-//
+/*
+ * ISO14443-2F.c
+ *
+ *  Created on: 5.7.2024
+ *      Author: Ladislav Marko
+ *  Inspired by ISO14443-2A.c and ISO15693.c
+ */
 
 #include "ISO14443-2F.h"
 #include "../System.h"
@@ -69,12 +73,17 @@ uint8_t LegicPrimePRNGGetBit(void){
 // a dash takes 5us, stars symbolise a measurement that should be every 20us
 // we decode HHHHL as 1 and HHL as 0
 
+// This is +-20 microseconds
 #define READER_SIGNAL_SAMPLE_RATE_IN_SYSTEM_CYCLES		((uint16_t) (((uint64_t) F_CPU * ISO14443F_BIT_RATE_CYCLES) / CODEC_CARRIER_FREQ))
-// This is 30 microseconds
+
+// This is +-30 microseconds
 #define FIRST_SAMPLING_OFFSET_IN_SYSTEM_CYCLES 659
-#define SAMPLING_OFFSET_IN_SYSTEM_CYCLES 244
+
+//This is +-100 microseconds
 #define TRANSMIT_RATE_IN_SYSTEM_CYCLES  1361
-#define ISO14443A_MIN_BITS_PER_FRAME		7
+
+//This is +-320 microseconds
+#define FIRST_TRANSMIT_OFFSET_IN_SYSTEM_CYCLES 4334
 
 static volatile struct {
 //    volatile bool LoadmodFinished;
@@ -88,7 +97,8 @@ typedef enum {
     END_RECEIVE //Give away control after all data have been received
 } ReceiveStateType;
 
-
+// Enum for states of the transmit functions that modulate data to the reader
+// The cycle should be NONE -> START -> BIT -> BIT -> ... -> BIT -> END -> NONE
 typedef enum {
     TRANSMIT_NONE,
     TRANSMIT_START,
@@ -103,7 +113,6 @@ typedef enum {
 #define SampleRegister	Codec8Reg3
 #define BitSent			CodecCount16Register1
 #define BitCount		CodecCount16Register2
-#define ParityBufferPtr	CodecPtrRegister2
 
 /* Nastav pin PE0 na HIGH
 * Používáno pro můj debug, PE0 není nijak potřeba pro reálný provoz karty
@@ -120,8 +129,8 @@ INLINE void set_PE0_low(void){
     PORTE.OUTCLR |= PIN0_bm;
 }
 
+/* Handles the end of reading data from the reader when the physical layer data make sense */
 INLINE void ISO14443_F_DEMOD_END(void) {
-
     SampleIdxRegister = 0;
     /* Disable demodulation interrupt */
     if (1) {
@@ -137,18 +146,13 @@ INLINE void ISO14443_F_DEMOD_END(void) {
      * an interrupt once it has reached the FDT. */
     CODEC_TIMER_LOADMOD.CTRLD = TC_EVACT_OFF_gc; /* Disable restarts on modulation ends */
     CODEC_TIMER_LOADMOD.PERBUF = TRANSMIT_RATE_IN_SYSTEM_CYCLES; /* Prepare to change state every 100 us */
-    CODEC_TIMER_LOADMOD.PER = 4334; /* +- 330 microseconds */ //TODO: Try 4334 for 320 microseconds as measured on Kaba
+    CODEC_TIMER_LOADMOD.PER = FIRST_TRANSMIT_OFFSET_IN_SYSTEM_CYCLES; /* +- 320 microseconds offset from now */
     CODEC_TIMER_LOADMOD.INTFLAGS = TC0_OVFIF_bm; /* Clear overflow interrupt flag */
     CODEC_TIMER_LOADMOD.INTCTRLA = TC_OVFINTLVL_HI_gc; /* Set overflow interrupt level to high */
 
     TransmitStateRegister = TRANSMIT_START;
-//    TransmitSynced = 0;
     ReceiveStateRegister = END_RECEIVE;
-    //Zero out unused bytes for logging
-    for (uint16_t i = 0; i < (BitCount % 8); i++){
-        CodecBuffer[(BitCount + 7) / 8] &= ~(1u << i);
-    }
-    LogEntry(LOG_INFO_CODEC_RX_DATA, CodecBuffer, (BitCount+7)/8 );
+
 }
 
 // v ^                                          Trigger here
@@ -166,16 +170,18 @@ void EnableFirstModulationPauseInterrupt(void){
     CODEC_DEMOD_IN_PORT.INT0MASK = CODEC_DEMOD_IN_MASK0;
 }
 
-/* Funkce které vyčistí nastavení po tom co demodulujeme bordel */
+/* Handles the end of reading data from the reader when the physical layer data don't make sense */
 INLINE void ISO14443_F_GARBAGE(void){
     SampleIdxRegister = 0;
     CODEC_TIMER_SAMPLING.CTRLA = TC_CLKSEL_OFF_gc; /* Disconnect system clock from demod timer */
     CODEC_TIMER_SAMPLING.CTRLD = TC_EVACT_OFF_gc; /* Remove action from timer */
     CODEC_TIMER_SAMPLING.INTCTRLB = TC_OVFINTLVL_OFF_gc; /* Disable CCA interrupts */
     CODEC_TIMER_SAMPLING.INTFLAGS = TC0_OVFIF_bm; /* Clear OVF interrupt flag */
-    EnableFirstModulationPauseInterrupt();
+    EnableFirstModulationPauseInterrupt(); /* Start listening for the reader's field changes again */
 }
 
+/* Starts Loadmod timer as a free-running timer and syncs it to reader's modulation ends, so it will be accurate when
+ * we really need to start using it later */
 void PrepareLoadmodTimer(void){
     CODEC_TIMER_LOADMOD.CTRLA = CODEC_TIMER_CARRIER_CLKSEL; /* Use Carrier wave as timer source */
     CODEC_TIMER_LOADMOD.CTRLD = TC_EVACT_RESTART_gc | CODEC_TIMER_MODEND_EVSEL; /* Restart time on modulation ends */
@@ -184,12 +190,12 @@ void PrepareLoadmodTimer(void){
     CODEC_TIMER_LOADMOD.PER = 0xFFFF; /* Set period to too high of a value */
 }
 
+/* Starts waiting for first demodulation pause to start sampling reader's field (and also prepares Loadmod timer) */
 INLINE void StartDemod(void) {
     PrepareLoadmodTimer();
 
     /* Activate Power for demodulator */
     CodecSetDemodPower(true);
-    ParityBufferPtr = &CodecBuffer[ISO14443A_BUFFER_PARITY_OFFSET];
     ReceiveStateRegister = DO_RECEIVE;
     SampleRegister = 0;
     SampleIdxRegister = 0;
@@ -198,8 +204,21 @@ INLINE void StartDemod(void) {
     EnableFirstModulationPauseInterrupt();
 }
 
-/* This handles the interrupt raised after first event on the DEMOD pin
- * Starts CODEC_TIMER_SAMPLING for sampling the reader's data */
+/* This handles the interrupt enabled in EnableFirstModulationPauseInterrupt()
+ *
+ * Since it should trigger at the start of the reader's first modulation pause, simply wait a predefined interval
+ * to align the timer and then start sampling each 20 microseconds with counter overflow (OVF) event
+ * v ^    NOW       PER2 PER2 PER2
+ * o |     |--PER--|    |    |    |
+ * l |     V       |    |    |    |
+ * t | ----+    +--*----*----*----*--+  S  +--*----*--+  S
+ * a |     |    |  *    *    *    *  |  *  |  *    *  |  *
+ * g |     |    |  *    *    *    *  |  *  |  *    *  |  *
+ * e |     +----+  S    S    S    S  +--*--+  S    S  +--*--
+ *   +-------------------------------------------------------------------------------------------> time
+ *
+ * NOTE: PERBUF will become PER the first time CNT==PER will be true, here denoted PER2
+ * read chapter 14 about Timer/Counter Type 0 and 1 of ATxmega manual for more information */
 ISR_SHARED isr_ISO14443_F_CODEC_DEMOD_IN_INT0_VECT(void) {
     /* Configure sampling-timer free running and sync to first modulation-pause. */
     /* CodecInitCommon(); sets Event channel 0 to signal the beginning (rising edge) of a modulation pause and Event channel 1 to
@@ -212,7 +231,7 @@ ISR_SHARED isr_ISO14443_F_CODEC_DEMOD_IN_INT0_VECT(void) {
     CODEC_TIMER_SAMPLING.INTCTRLA = TC_OVFINTLVL_HI_gc; /* Mark timer overflow interrupt as high level */
     CODEC_TIMER_SAMPLING.INTFLAGS = TC0_OVFIF_bm; /* Clear timer overflow interrupt flag */
 
-    /* Disable this interrupt. From now on we will sample the field using our CODEC_TIMER_SAMPLING */
+    /* Disable this interrupt. From now on we will sample the field using our CODEC_TIMER_SAMPLING OVF interrupt */
     CODEC_DEMOD_IN_PORT.INT0MASK = 0;
 
 }
@@ -221,18 +240,18 @@ void disable_loadmod_timer(void){
     CODEC_TIMER_LOADMOD.INTCTRLA = TC_OVFINTLVL_OFF_gc;
 }
 
-void set_bit_on_position_in_buffer_to_value(volatile uint8_t * buffer, uint16_t position, uint8_t value){
+INLINE void SetBitOnPositionInBufferToValue(volatile uint8_t * buffer, uint16_t position, uint8_t value){
     uint16_t byte_offset = position / 8;
     uint8_t bit_offset = position % 8;
 
     if (value){
         buffer[byte_offset] |= (1 << bit_offset);        // Set bit to 1
     } else {
-        buffer[byte_offset] &= ~(1 << bit_offset);        // Set bit to 0
+        buffer[byte_offset] &= ~(1 << bit_offset);       // Set bit to 0
     }
 }
 
-uint8_t get_bit_on_position_in_buffer(const uint8_t * buffer, uint16_t position){
+uint8_t GetBitOnPositionInBuffer(const uint8_t * buffer, uint16_t position){
     uint16_t byte_offset = position / 8;
     uint8_t bit_offset = position % 8;
 
@@ -242,25 +261,23 @@ uint8_t get_bit_on_position_in_buffer(const uint8_t * buffer, uint16_t position)
 // This function translates raw signal from the SamplePin to logical bits by reading SamplePin's value
 // if 2 highs and a low are observed, it stores a logical 0 into CodecBuffer
 // if 4 highs and a low are observed, it stores a logical 1 into CodecBuffer
-INLINE void demodulate_reader_bit(void){
+INLINE void DemodulateReaderBit(void){
     SampleIdxRegister++;
 
     uint8_t SamplePin = CODEC_DEMOD_IN_PORT.IN & CODEC_DEMOD_IN_MASK;
 
     /* Shift sampled bit into sampling register */
-    // Sample pin očekávám z téhle negace, že mi vrací 1 když naměřil LOW a 0 když naměřil HIGH
-
     SampleRegister = (SampleRegister << 1) | (!SamplePin ? 0x01 : 0x00);
 
     if (!(SampleRegister & 0x1)) { // if last read bit is a zero
         //SynchronizeSamplingTimerToDemodEnd();
         if (!(SampleRegister ^ 0x1E)) {
             // We have read a 1
-            set_bit_on_position_in_buffer_to_value(CodecBuffer, BitCount, 1);
+            SetBitOnPositionInBufferToValue(CodecBuffer, BitCount, 1);
             BitCount++;
         } else if (!(SampleRegister ^ 0x06)) {
             // We have read a 0
-            set_bit_on_position_in_buffer_to_value(CodecBuffer, BitCount, 0);
+            SetBitOnPositionInBufferToValue(CodecBuffer, BitCount, 0);
             BitCount++;
         } else {
             ISO14443_F_GARBAGE();
@@ -291,12 +308,12 @@ ISR_SHARED isr_ISO14443_F_CODEC_TIMER_SAMPLING_OVF_VECT(void){
         }
     }
     if (ReceiveStateRegister == DO_RECEIVE) {
-        demodulate_reader_bit();
+        DemodulateReaderBit();
     }
 
 }
 
-// Modulate as a card to send card response
+// Modulate as a card to send card response every 100 microseconds
 ISR_SHARED isr_ISO14443_F_CODEC_TIMER_LOADMOD_OVF_VECT(void) {
     static void *JumpTable[] = {
             [TRANSMIT_NONE] = && TRANSMIT_NONE_LABEL,
@@ -305,16 +322,15 @@ ISR_SHARED isr_ISO14443_F_CODEC_TIMER_LOADMOD_OVF_VECT(void) {
             [TRANSMIT_END] = && TRANSMIT_END_LABEL
     };
 
-    //TODO: Přidej label ochranu
     if ((TransmitStateRegister >= TRANSMIT_NONE) && (TransmitStateRegister <= TRANSMIT_END)) {
         goto *JumpTable[TransmitStateRegister];
     } else {
         TerminalSendString("ERROR: Jump to unregistered label!\r\n");
+        //TODO: Log error to memory as well
         return;
     }
 
 TRANSMIT_NONE_LABEL:
-//    TerminalSendString("Transmit label none \r\n");
     return;
 
 TRANSMIT_START_LABEL:
@@ -324,7 +340,7 @@ TRANSMIT_START_LABEL:
     CodecStartSubcarrier();
     /* Fallthrough */
 TRANSMIT_BIT_LABEL:
-    CodecSetLoadmodState(get_bit_on_position_in_buffer(CodecBuffer, BitSent));
+    CodecSetLoadmodState(GetBitOnPositionInBuffer(CodecBuffer, BitSent));
     BitSent++;
     if (BitSent >= BitCount){
         TransmitStateRegister = TRANSMIT_END;
@@ -351,7 +367,6 @@ void ISO14443FCodecInit(void) {
     isr_func_CODEC_DEMOD_IN_INT0_VECT = &isr_ISO14443_F_CODEC_DEMOD_IN_INT0_VECT;
     isr_func_CODEC_TIMER_SAMPLING_OVF_vect = &isr_ISO14443_F_CODEC_TIMER_SAMPLING_OVF_VECT;
     isr_func_CODEC_TIMER_LOADMOD_OVF_VECT = &isr_ISO14443_F_CODEC_TIMER_LOADMOD_OVF_VECT;
-    isr_func_CODEC_TIMER_SAMPLING_CCA_vect = &isr_ISO14443_F_CODEC_TIMER_SAMPLING_CCA_VECT;
     CodecInitCommon();
     StartDemod();
 }
@@ -384,14 +399,16 @@ void ISO14443FCodecDeInit(void) {
 void ISO14443FCodecTask(void) {
 
     if (ReceiveStateRegister == END_RECEIVE) {
+        LEDHook(LED_CODEC_RX, LED_PULSE); /* Signal data received */
 
-        // Zablikej, že jsme přijali data
-        LEDHook(LED_CODEC_RX, LED_PULSE);
-        // Zaloguj přijatá data - TODO: bity ukládáme jako byty
-        //LogEntry(LOG_INFO_CODEC_RX_DATA, CodecBuffer, BitCount);
+        /* Zero out unused bytes for logging */
+        for (uint16_t i = 0; i < (BitCount % 8); i++){
+            CodecBuffer[(BitCount + 7) / 8] &= ~(1u << i);
+        }
+        LogEntry(LOG_INFO_CODEC_RX_DATA, CodecBuffer, (BitCount+7)/8 );
+
 
         uint16_t AnswerBitCount;
-        // Zavolej aplikační vrstvu
         AnswerBitCount = ApplicationProcess(CodecBuffer, BitCount);
 
         if (AnswerBitCount != ISO14443F_APP_NO_RESPONSE) {
