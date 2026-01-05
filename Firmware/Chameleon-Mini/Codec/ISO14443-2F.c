@@ -1,6 +1,8 @@
 /*
  * ISO14443-2F.c
  *
+ * This code implements LEGIC prime physical layer for card emulation.
+ *
  *  Created on: 5.7.2024
  *      Author: Ladislav Marko
  *  Inspired by ISO14443-2A.c and ISO15693.c
@@ -14,23 +16,19 @@
 #include "Log.h"
 
 // ------------------------ LEGIC CODEC SECTION -------------------------------
-/* Sampling is done using internal clock, synchronized to the field modulation.
- * For that we need to convert the bit rate for the internal clock. */
-// F_CPU = 2 * 13 560 000UL = Speed of the CPU, in Hz
-// CODEC_CARRIER_FREQ = 13 560 000
-// READER_SIGNAL_SAMPLE_RATE_IN_SYSTEM_CYCLES = (2 * 13 560 000 * ISO14443F_BIT_RATE_CYCLES) / 13 560 000 = 2 * ISO14443F_BIT_RATE_CYCLES
-
-// Our "Bitrate in cycles" is F_CPU / bitrate
-// But our "bitrate" is variable. Received bit 1 takes 80us HIGH and a bit 0 takes 40us HIGH.
+// For reading the reader's data:
+// Sampling of the reader is done using internal clock, synchronized to the first field modulation pause.
+//
+// Reader's "bitrate" is variable. Received bit 1 takes 80us HIGH and a bit 0 takes 40us HIGH.
 // After both, there needs to be 20us of LOW.
-// So we can effectively say that 1 is composited of 80us of HIGH and 20us LOW which takes 100us in total
-// and 0 is composited of 40us of HIGH and 20us of LOW which takes 60us in total.
-// GCD of 100 and 60 is 20, so we need to measure every 20us to be sure we are synced.
+//
+// We can thus say, that 1 is composited of 80us of HIGH and 20us LOW, which takes 100us in total,
+// and 0 is composited of 40us of HIGH and 20us of LOW, which takes 60us in total.
+// Greatest common divisor of 100 and 60 is 20, so we need to measure every 20us to be sure we are synced.
 // Thus, every time we measure LOW, we'll look into our memory and if we encountered
 // 4 HIGHs before, we have just received a 1 or if we read just 2 HIGHs, we have received a 0.
-// So effectively we need to sample each 20us which makes our bitrate 50 kbps
+// Effectively we need to sample each 20us which makes our bitrate 50 kbps
 // which in turn makes our BIT_RATE_CYCLES 542 (.4)
-//
 //
 // v ^
 // o |
@@ -41,8 +39,17 @@
 // e |  |                +----+        +----+  H    H    H    H  +--*--+  H    H  +--*--
 //   +-------------------------------------------------------------------------------------------> time
 //
-// a dash takes 5us, stars symbolise a measurement that should be every 20us
+// NOTE: a dash takes 5us, stars symbolise a measurement that should be every 20us
 // we decode HHHHL as 1 and HHL as 0
+//
+//
+// For sending data:
+// Sending uses the carrier frequency as a clock source and is synchronized to reader's last modulation pause.
+//
+// We need to wait +-320us after last reader bit and then start sending card data.
+// We use on-off keying with 1/64 of the carrier wave as the subcarrier with bit duration of 100us.
+//
+// The reader usually responds after 230us with new data.
 
 // This is +-20 microseconds
 #define READER_SIGNAL_SAMPLE_RATE_IN_SYSTEM_CYCLES		((uint16_t) (((uint64_t) F_CPU * ISO14443F_BIT_RATE_CYCLES) / CODEC_CARRIER_FREQ))
@@ -167,20 +174,24 @@ INLINE void StartDemod(void) {
 
 /* This handles the interrupt enabled in EnableFirstModulationPauseInterrupt()
  *
- * Since it should trigger at the start of the reader's first modulation pause, simply wait a predefined interval
- * to align the timer and then start sampling each 20 microseconds with counter overflow (OVF) event
+ * This should trigger at the start of the reader's first modulation pause. It then starts the sampling timer
+ * to simply wait for a predefined interval, to align the timer about 10us into the first data transmission from
+ * the reader, and then to start sampling each 20 microseconds with the counter overflow (OVF) event
  * v ^    NOW       PER2 PER2 PER2
  * o |     |--PER--|    |    |    |
  * l |     V       |    |    |    |
- * t | ----+    +--*----*----*----*--+  S  +--*----*--+  S
+ * t | ----+    +--*----*----*----*--+  O  +--*----*--+  O
  * a |     |    |  *    *    *    *  |  *  |  *    *  |  *
  * g |     |    |  *    *    *    *  |  *  |  *    *  |  *
- * e |     +----+  S    S    S    S  +--*--+  S    S  +--*--
+ * e |     +----+  O    O    O    O  +--*--+  O    O  +--*--
  *   +-------------------------------------------------------------------------------------------> time
  *
+ * a dash takes 5us, O symbolises CODEC_TIMER_SAMPLING overflow interrupt that will get handled by
+ * the isr_ISO14443_2F_CODEC_TIMER_SAMPLING_OVF_VECT function
+
  * NOTE: PERBUF will become PER the first time CNT==PER will be true, here denoted PER2
  * read chapter 14 about Timer/Counter Type 0 and 1 of ATxmega manual for more information */
-ISR_SHARED isr_ISO14443_F_CODEC_DEMOD_IN_INT0_VECT(void) {
+ISR_SHARED isr_ISO14443_2F_CODEC_DEMOD_IN_INT0_VECT(void) {
     /* Configure sampling-timer free running and sync to first modulation-pause. */
     /* CodecInitCommon(); sets Event channel 0 to signal the beginning (rising edge) of a modulation pause and Event channel 1 to
      * signal the end (falling edge) of a modulation pause. */
@@ -219,10 +230,15 @@ uint8_t GetBitOnPositionInBuffer(const uint8_t * buffer, uint16_t position){
     return (buffer[byte_offset] & (1 << bit_offset)) >> bit_offset;
 }
 
-// This function translates raw signal from the SamplePin to logical bits by reading SamplePin's value
+
+// This triggers every 20us and samples the readers field
+// from SamplePin's raw value which it converts to logical bits
 // if 2 highs and a low are observed, it stores a logical 0 into CodecBuffer
 // if 4 highs and a low are observed, it stores a logical 1 into CodecBuffer
-INLINE void DemodulateReaderBit(void){
+ISR_SHARED isr_ISO14443_2F_CODEC_TIMER_SAMPLING_OVF_VECT(void){
+    if (ReceiveStateRegister != DO_RECEIVE) {
+        return;
+    }
     SampleIdxRegister++;
 
     uint8_t SamplePin = CODEC_DEMOD_IN_PORT.IN & CODEC_DEMOD_IN_MASK;
@@ -257,18 +273,8 @@ INLINE void DemodulateReaderBit(void){
     }
 }
 
-//This triggers every 20us and samples the readers field
-ISR_SHARED isr_ISO14443_F_CODEC_TIMER_SAMPLING_OVF_VECT(void){
-    CODEC_TIMER_SAMPLING.INTFLAGS = TC0_OVFIF_bm; /* Clear timer overflow interrupt flag TODO: Maybe not needed */
-
-    if (ReceiveStateRegister == DO_RECEIVE) {
-        DemodulateReaderBit();
-    }
-
-}
-
 // Modulate as a card to send card response every 100 microseconds
-ISR_SHARED isr_ISO14443_F_CODEC_TIMER_LOADMOD_OVF_VECT(void) {
+ISR_SHARED isr_ISO14443_2F_CODEC_TIMER_LOADMOD_OVF_VECT(void) {
     static void *JumpTable[] = {
             [TRANSMIT_NONE] = && TRANSMIT_NONE_LABEL,
             [TRANSMIT_START] = && TRANSMIT_START_LABEL,
@@ -315,9 +321,9 @@ void ISO14443FCodecInit(void) {
     ReceiveStateRegister = DONT_RECEIVE;
     TransmitStateRegister = TRANSMIT_NONE;
 
-    isr_func_CODEC_DEMOD_IN_INT0_VECT = &isr_ISO14443_F_CODEC_DEMOD_IN_INT0_VECT;
-    isr_func_CODEC_TIMER_SAMPLING_OVF_vect = &isr_ISO14443_F_CODEC_TIMER_SAMPLING_OVF_VECT;
-    isr_func_CODEC_TIMER_LOADMOD_OVF_VECT = &isr_ISO14443_F_CODEC_TIMER_LOADMOD_OVF_VECT;
+    isr_func_CODEC_DEMOD_IN_INT0_VECT = &isr_ISO14443_2F_CODEC_DEMOD_IN_INT0_VECT;
+    isr_func_CODEC_TIMER_SAMPLING_OVF_vect = &isr_ISO14443_2F_CODEC_TIMER_SAMPLING_OVF_VECT;
+    isr_func_CODEC_TIMER_LOADMOD_OVF_VECT = &isr_ISO14443_2F_CODEC_TIMER_LOADMOD_OVF_VECT;
     CodecInitCommon();
     StartDemod();
 }

@@ -1,19 +1,18 @@
-//
-// Created by l on 6.8.24.
-//
+/*
+ * LegicPrime.c
+ *
+ *  Created on: 5.7.2024
+ *      Author: Ladislav Marko
+ *  Inspired by MifareClassic.c
+ */
 #if defined(CONFIG_LEGIC_PRIME_SUPPORT)
 
 #include "LegicPrime.h"
 
 char legic_log_str[64];
 
-// ============================== From MifareClassic.c
-
-#include "ISO14443-3A.h"
 #include "../Codec/ISO14443-2F.h"
 #include "../Memory.h"
-#include "Crypto1.h"
-#include "../Random.h"
 
 #define MEM_UID_ADDRESS         0x00
 #define MEM_UID_CRC_ADDRESS     0x04
@@ -36,23 +35,6 @@ char legic_log_str[64];
  * additional segments
  * */
 uint8_t response_index;
-
-static enum {
-    STATE_HALT,
-    STATE_IDLE,
-    STATE_CHINESE_IDLE,
-    STATE_CHINESE_WRITE,
-    STATE_READY1,
-    STATE_READY2,
-    STATE_ACTIVE,
-    STATE_AUTHING,
-    STATE_AUTHED_IDLE,
-    STATE_WRITE,
-    STATE_INCREMENT,
-    STATE_DECREMENT,
-    STATE_RESTORE
-} State;
-
 
 uint16_t LegicPrimeAppProcess(uint8_t *Buffer, uint16_t BitCount) {
 
@@ -110,25 +92,22 @@ void LegicPrimeSetUid(ConfigurationUidType Uid) {
     //TODO: Write also the LEGIC prime UID CRC to MEM_UID_CRC_ADDRESS
     LogEntry(LOG_INFO_GENERIC, legic_log_str, strlen(legic_log_str));
 }
+
 void LegicPrimeAppInit(void) {
     response_index = 0;
     sprintf(legic_log_str, "LEGIC APP INIT");
     LogEntry(LOG_INFO_GENERIC, legic_log_str, strlen(legic_log_str));
-    State = STATE_IDLE;
 
-    // Prepare some captured communication beforehand TODO: remove this and use a terminal command to store them
+    // Prepare some captured communication beforehand or upload through the SEND/UPLOAD terminal functionality
     // Card ID: 0x57 0x46 0x5f 0x85
-    uint8_t capture1[] =  {0x39, 0x3e, 0x5, 0x45, 0x5, 0xfb, 0x2, 0x41, 0x0, 0xac, 0xc};
-    MemoryWriteBlock(capture1, MEM_REPLAY_ADDRESS, 11);
+    uint8_t capture[] =  {0x39, 0x3e, 0x5, 0x45, 0x5, 0xfb, 0x2, 0x41, 0x0, 0xac, 0xc};
+    MemoryWriteBlock(capture, MEM_REPLAY_ADDRESS, 11);
     // Card ID: 0x81 0xAB 0xB8 0x4A
-//    uint8_t capture2[] = {0x19, 0x27, 0xb, 0x9b, 0x1, 0xa1, 0x1, 0x6d, 0xa, 0x52, 0x3};
-//    MemoryWriteBlock(capture2, MEM_REPLAY_ADDRESS_2, 11);
+    //    uint8_t capture2[] = {0x19, 0x27, 0xb, 0x9b, 0x1, 0xa1, 0x1, 0x6d, 0xa, 0x52, 0x3};
+    //    MemoryWriteBlock(capture2, MEM_REPLAY_ADDRESS, 11);
 }
 
 void LegicPrimeAppReset(void) {
     response_index = 0;
-    State = STATE_IDLE;
 }
-
-// ============================== end MifareClassic.c
 #endif

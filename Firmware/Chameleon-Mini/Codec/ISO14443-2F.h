@@ -2,8 +2,8 @@
  * ISO14443-2F.h
  *
  *  Created on: 5.7.2024
- *      Author: l
- *      Based on: ISO14443-2A.h
+ *      Author: Ladislav Marko
+ *  Inspired by ISO14443-2A.h and ISO15693.h
  */
 
 #ifndef ISO14443_F_H_
@@ -16,10 +16,5 @@
 void ISO14443FCodecInit(void);
 void ISO14443FCodecDeInit(void);
 void ISO14443FCodecTask(void);
-
-/* LEGIC PRIME PRNG */
-void LegicPrimePRNGInit(uint8_t iv);
-void LegicPrimePRNGAdvance();
-uint8_t LegicPrimePRNGGetBit();
 
 #endif //ISO14443_F_H_
