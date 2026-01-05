@@ -13,35 +13,6 @@
 #include "Codec.h"
 #include "Log.h"
 
-// ------------------------ LEGIC PRIME PRNG SECTION -------------------------
-static struct legicPRNG_t {
-    uint8_t a;
-    uint8_t b;
-    size_t step;
-} legicPRNG;
-
-void LegicPrimePRNGInit(uint8_t iv){
-    legicPRNG.a = iv;
-    legicPRNG.b = (iv << 1) | 1;
-    legicPRNG.step = 0;
-}
-void LegicPrimePRNGAdvance(size_t steps){
-    while(steps--){
-        uint8_t new_b_bit = legicPRNG.b ^ (legicPRNG.b >> 2) ^ (legicPRNG.b >> 3) ^ (legicPRNG.b >> 7);
-        legicPRNG.b = (new_b_bit << 7) | (legicPRNG.b >> 1);
-
-        uint8_t new_a_bit = legicPRNG.a ^ (legicPRNG.a >> 6);
-        legicPRNG.a = (new_a_bit << 6) | legicPRNG.a  >> 1;
-    }
-}
-uint8_t LegicPrimePRNGGetBit(void){
-    uint8_t index = (legicPRNG.a ^ 0x1C) >> 2; // Flip the bits 2,3 and 4 from a and move them, so they are LSB
-    index = ((index & 4) >> 2) | (index & 2) | ((index & 1) << 2); // Reverse their direction
-    return (legicPRNG.b >> index) & 1; // Select only one bit from b according to index made from a
-}
-
-
-
 // ------------------------ LEGIC CODEC SECTION -------------------------------
 /* Sampling is done using internal clock, synchronized to the field modulation.
  * For that we need to convert the bit rate for the internal clock. */
@@ -85,11 +56,7 @@ uint8_t LegicPrimePRNGGetBit(void){
 //This is +-320 microseconds
 #define FIRST_TRANSMIT_OFFSET_IN_SYSTEM_CYCLES 4334
 
-static volatile struct {
-//    volatile bool LoadmodFinished;
-} Flags = { 0 };
-
-// Enum for states of the receive functions that demodulate data from the reader
+// Enum for states of the recieve functions that demodulate data from the reader
 // The cycle should be DONT -> DO -> END -> DONT
 typedef enum {
     DONT_RECEIVE,
@@ -114,17 +81,13 @@ typedef enum {
 #define BitSent			CodecCount16Register1
 #define BitCount		CodecCount16Register2
 
-/* Nastav pin PE0 na HIGH
-* Používáno pro můj debug, PE0 není nijak potřeba pro reálný provoz karty
-*/
+/* Set pin PE0 to HIGH - used only for debugging during development */
 INLINE void set_PE0_high(void){
     PORTE.DIRSET |= PIN0_bm;
     PORTE.OUTSET |= PIN0_bm;
 }
 
-/* Nastav pin PE0 na LOW
- * Používáno pro můj debug, PE0 není nijak potřeba pro reálný provoz karty
- * */
+/* Set pin PE0 to LOW - used only for debugging during development */
 INLINE void set_PE0_low(void){
     PORTE.OUTCLR |= PIN0_bm;
 }
@@ -133,12 +96,10 @@ INLINE void set_PE0_low(void){
 INLINE void ISO14443_F_DEMOD_END(void) {
     SampleIdxRegister = 0;
     /* Disable demodulation interrupt */
-    if (1) {
-        CODEC_TIMER_SAMPLING.CTRLA = TC_CLKSEL_OFF_gc; /* Disconnect system clock from demod timer */
-        CODEC_TIMER_SAMPLING.CTRLD = TC_EVACT_OFF_gc; /* Remove action from timer */
-        CODEC_TIMER_SAMPLING.INTCTRLB = TC_CCAINTLVL_OFF_gc; /* Disable CCA interrupts */
-        CODEC_TIMER_SAMPLING.INTFLAGS = TC0_CCAIF_bm; /* Clear CCA interrupt flag */
-    }
+    CODEC_TIMER_SAMPLING.CTRLA = TC_CLKSEL_OFF_gc; /* Disconnect system clock from demod timer */
+    CODEC_TIMER_SAMPLING.CTRLD = TC_EVACT_OFF_gc; /* Remove action from timer */
+    CODEC_TIMER_SAMPLING.INTCTRLB = TC_CCAINTLVL_OFF_gc; /* Disable CCA interrupts */
+    CODEC_TIMER_SAMPLING.INTFLAGS = TC0_CCAIF_bm; /* Clear CCA interrupt flag */
 
     /* By this time, the LOADMOD timer is aligned to the last modulation
      * edge of the reader. So we disable the auto-synchronization and
@@ -235,7 +196,7 @@ ISR_SHARED isr_ISO14443_F_CODEC_DEMOD_IN_INT0_VECT(void) {
     CODEC_DEMOD_IN_PORT.INT0MASK = 0;
 
 }
-void disable_loadmod_timer(void){
+INLINE void DisableLoadmodTimer(void){
     CODEC_TIMER_LOADMOD.CTRLA = TC_CLKSEL_OFF_gc;
     CODEC_TIMER_LOADMOD.INTCTRLA = TC_OVFINTLVL_OFF_gc;
 }
@@ -298,15 +259,8 @@ INLINE void DemodulateReaderBit(void){
 
 //This triggers every 20us and samples the readers field
 ISR_SHARED isr_ISO14443_F_CODEC_TIMER_SAMPLING_OVF_VECT(void){
-    CODEC_TIMER_SAMPLING.INTFLAGS = TC0_OVFIF_bm; /* Clear timer overflow interrupt flag */
+    CODEC_TIMER_SAMPLING.INTFLAGS = TC0_OVFIF_bm; /* Clear timer overflow interrupt flag TODO: Maybe not needed */
 
-    if (Flags.PRNGInitialized){
-        Flags.TickCounter++;
-        if (Flags.TickCounter == 5){
-//            LegicPrimePRNGAdvance(1);
-            Flags.TickCounter = 0;
-        }
-    }
     if (ReceiveStateRegister == DO_RECEIVE) {
         DemodulateReaderBit();
     }
@@ -352,15 +306,12 @@ TRANSMIT_END_LABEL:
     CodecSetLoadmodState(false);
     CodecSetSubcarrier(CODEC_SUBCARRIERMOD_OFF, 0);
 
-    disable_loadmod_timer();
+    DisableLoadmodTimer();
     StartDemod();
 }
 
 void ISO14443FCodecInit(void) {
-    TerminalSendString("Legic ISO14443FCodecInit\r\n");
-
     /* Initialize some global vars and start looking out for reader commands */
-    //Flags.LoadmodFinished = 0;
     ReceiveStateRegister = DONT_RECEIVE;
     TransmitStateRegister = TRANSMIT_NONE;
 
@@ -374,7 +325,6 @@ void ISO14443FCodecInit(void) {
 void ISO14443FCodecDeInit(void) {
     /* Gracefully shutdown codec */
     CODEC_DEMOD_IN_PORT.INT0MASK = 0;
-    //Flags.LoadmodFinished = 0;
     ReceiveStateRegister = DONT_RECEIVE;
     TransmitStateRegister = TRANSMIT_NONE;
 
@@ -397,7 +347,6 @@ void ISO14443FCodecDeInit(void) {
 }
 
 void ISO14443FCodecTask(void) {
-
     if (ReceiveStateRegister == END_RECEIVE) {
         LEDHook(LED_CODEC_RX, LED_PULSE); /* Signal data received */
 
@@ -418,9 +367,8 @@ void ISO14443FCodecTask(void) {
             TransmitStateRegister = TRANSMIT_START;
         } else {
             /* No data to be processed. Disable loadmodding and start listening again */
-            disable_loadmod_timer();
+            DisableLoadmodTimer();
             StartDemod();
         }
     }
 }
-
