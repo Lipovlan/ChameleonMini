@@ -70,6 +70,10 @@ uint8_t LegicPrimePRNGGetBit(){
 // we decode HHHHL as 1 and HHL as 0
 
 #define READER_SIGNAL_SAMPLE_RATE_IN_SYSTEM_CYCLES		((uint16_t) (((uint64_t) F_CPU * ISO14443F_BIT_RATE_CYCLES) / CODEC_CARRIER_FREQ) )
+#define READER_SIGNAL_SAMPLE_RATE_IN_SYSTEM_CYCLES		((uint16_t) (((uint64_t) F_CPU * ISO14443F_BIT_RATE_CYCLES) / CODEC_CARRIER_FREQ))
+// This is 30 microseconds
+#define FIRST_SAMPLING_OFFSET_IN_SYSTEM_CYCLES 659
+#define SAMPLING_OFFSET_IN_SYSTEM_CYCLES 244
 #define TRANSMIT_RATE_IN_SYSTEM_CYCLES  1361
 #define ISO14443A_MIN_BITS_PER_FRAME		7
 
@@ -123,7 +127,7 @@ INLINE void ISO14443_F_DEMOD_END(void) {
 
     SampleIdxRegister = 0;
     /* Disable demodulation interrupt */
-    if (0) {
+    if (1) {
         CODEC_TIMER_SAMPLING.CTRLA = TC_CLKSEL_OFF_gc; /* Disconnect system clock from demod timer */
         CODEC_TIMER_SAMPLING.CTRLD = TC_EVACT_OFF_gc; /* Remove action from timer */
         CODEC_TIMER_SAMPLING.INTCTRLB = TC_CCAINTLVL_OFF_gc; /* Disable CCA interrupts */
@@ -147,31 +151,29 @@ INLINE void ISO14443_F_DEMOD_END(void) {
     LogEntry(LOG_INFO_CODEC_RX_DATA, CodecBuffer, (BitCount+7)/8 );
 }
 
+// v ^                                          Trigger here
+// o |                                                |
+// l |  Reader charging card/previous communication   V            1                 0
+// t |------------------------------------------------|    +----------------+    +--------+
+// a |                                                |    |                |    |        |
+// g |                                                |    |                |    |        |
+// e |                                                |----|                +----+        +-----
+//   +-------------------------------------------------------------------------------------------> time
+void EnableFirstModulationPauseInterrupt(void){
+    /* Start looking out for modulation pause via interrupt. */
+    CODEC_DEMOD_IN_PORT.INTFLAGS = PORT_INT0IF_bm; /* Clear the Interrupt 0 flag on the DEMOD port (Port B) */
+    /* Set Pin 1 as source for Interrupt 0 on the DEMOD port (Port B) */
+    CODEC_DEMOD_IN_PORT.INT0MASK = CODEC_DEMOD_IN_MASK0;
+}
+
 /* Funkce které vyčistí nastavení po tom co demodulujeme bordel */
 INLINE void ISO14443_F_GARBAGE(void){
-    //TODO: Nic z tohohle není nejspíš správně, mělo by to jen vyčistit nastavení
-
-    ISO14443_F_DEMOD_END();
-//    /* No carrier modulation for 3 sample points. EOC! */
-//    /* Disable demodulation interrupt */
-//    /* Sets timer off for TCD0, disabling clock source. We're done receiving data from reader and don't need to probe the antenna anymore*/
-//    CODEC_TIMER_SAMPLING.CTRLA = TC_CLKSEL_OFF_gc;
-//    /* Clear Compare Channel C (CCC) interrupt Flags */
-//   CODEC_TIMER_SAMPLING.INTFLAGS = TC0_CCAIF_bm;
-//
-//   // TODO: Počkej nějakej čas než začneš samplovat?
-//    CODEC_TIMER_LOADMOD.PER = 1230;
-//
-//   /* By this time, the FDT timer is aligned to the last modulation
-//    * edge of the reader. So we disable the auto-synchronization and
-//    * let it count the frame delay time in the background, and generate
-//    * an interrupt once it has reached the FDT. */
-//    /* Enable loadmodulation interrupt */
-//    /* Disable the event action for TCE0 */
-//    CODEC_TIMER_LOADMOD.CTRLD = TC_EVACT_OFF_gc;
-//    /* Clear TCE0 interrupt flags for Capture Channel B */
-//    CODEC_TIMER_LOADMOD.INTFLAGS = TC0_OVFIF_bm;
-//    CODEC_TIMER_LOADMOD.INTCTRLA = TC_OVFINTLVL_HI_gc;
+    SampleIdxRegister = 0;
+    CODEC_TIMER_SAMPLING.CTRLA = TC_CLKSEL_OFF_gc; /* Disconnect system clock from demod timer */
+    CODEC_TIMER_SAMPLING.CTRLD = TC_EVACT_OFF_gc; /* Remove action from timer */
+    CODEC_TIMER_SAMPLING.INTCTRLB = TC_OVFINTLVL_OFF_gc; /* Disable CCA interrupts */
+    CODEC_TIMER_SAMPLING.INTFLAGS = TC0_OVFIF_bm; /* Clear OVF interrupt flag */
+    EnableFirstModulationPauseInterrupt();
 }
 
 static void StartDemod(void) {
@@ -196,51 +198,22 @@ static void StartDemod(void) {
      *   - Event Source Select: Trigger on a start of a modulation pause (Event on Event channel 0) */
     CODEC_TIMER_SAMPLING.CTRLD = TC_EVACT_RESTART_gc | CODEC_TIMER_MODSTART_EVSEL;
 
-    /* Temporarily disable Compare Channel A (CCA) interrupts.
-     * They'll be enabled later in isr_ISO14443_F_CODEC_DEMOD_IN_INT0_VECT once we sensed the reader is sending data, and we're in sync with the pulses */
-    CODEC_TIMER_SAMPLING.INTCTRLB = TC_CCAINTLVL_HI_gc;
-    CODEC_TIMER_SAMPLING.INTFLAGS = TC0_CCAIF_bm; /* Clear CCA interrupt flag */
-    CODEC_TIMER_SAMPLING.CCA = 0xFFFF; /* Disable CCA interrupt */
-
-    /* Start looking out for modulation pause via interrupt. */
-    CODEC_DEMOD_IN_PORT.INTFLAGS = PORT_INT0IF_bm; /* Clear the Interrupt 0 flag on the DEMOD port (Port B) */
-    /* Set Pin 1 as source for Interrupt 0 on the DEMOD port (Port B) */
-    CODEC_DEMOD_IN_PORT.INT0MASK = CODEC_DEMOD_IN_MASK0;
-
-// v ^                          Trigger here
-// o |                                |
-// l |     Reader charging card       V            1                 0
-// t |--------------------------------|    +----------------+    +--------+
-// a |                                |    |                |    |        |
-// g |                                |    |                |    |        |
-// e |                                |----|                +----+        +-----
-//   +-------------------------------------------------------------------------------------------> time
+    EnableFirstModulationPauseInterrupt();
 }
 
 /* This handles the interrupt raised after first event on the DEMOD pin
  * Starts CODEC_TIMER_SAMPLING for sampling the reader's data */
 ISR_SHARED isr_ISO14443_F_CODEC_DEMOD_IN_INT0_VECT(void) {
-    /* Enable timer for demodulation */
-    CODEC_TIMER_SAMPLING.INTFLAGS = TC0_CCAIF_bm; /* Clear CCA interrupt flag */
-    CODEC_TIMER_SAMPLING.INTCTRLB = TC_CCAINTLVL_HI_gc; /* Re-enable CCA interrupts */
-    CODEC_TIMER_SAMPLING.CCABUF = READER_SIGNAL_SAMPLE_RATE_IN_SYSTEM_CYCLES / 2 ;
-
-    /* Enable loadmodulation interrupt */
-    /* Setup Frame Delay Timer and wire to EVSYS. Frame delay time is
-     * measured from last change in RF field, therefore we use
-     * the event channel 1 (end of modulation pause) as the restart event.
-     * The preliminary frame delay time chosen here is irrelevant, because
-     * the correct FDT gets set automatically after demodulation.
-     *
-     * First entry to isr_ISO14443_F_CODEC_TIMER_LOADMOD_OVF_VECT will set
-     * correct PERiod.
-     * */
-    CODEC_TIMER_LOADMOD.CNT = 0;
-    CODEC_TIMER_LOADMOD.PER = 0xFFFF;
-    CODEC_TIMER_LOADMOD.CTRLD = TC_EVACT_RESTART_gc | CODEC_TIMER_MODEND_EVSEL;
-    CODEC_TIMER_LOADMOD.INTCTRLA = TC_OVFINTLVL_HI_gc;
-    CODEC_TIMER_LOADMOD.INTFLAGS = TC0_OVFIF_bm;
-    CODEC_TIMER_LOADMOD.CTRLA = CODEC_TIMER_CARRIER_CLKSEL; /* Use Carrier wave as timer source */
+    /* Configure sampling-timer free running and sync to first modulation-pause. */
+    /* CodecInitCommon(); sets Event channel 0 to signal the beginning (rising edge) of a modulation pause and Event channel 1 to
+     * signal the end (falling edge) of a modulation pause. */
+    CODEC_TIMER_SAMPLING.CNT = 0; /* Reset the timer's initial value*/
+    CODEC_TIMER_SAMPLING.PER = FIRST_SAMPLING_OFFSET_IN_SYSTEM_CYCLES; /* Set the timer's period, so we land +-10us into readers data signal */
+    CODEC_TIMER_SAMPLING.PERBUF = READER_SIGNAL_SAMPLE_RATE_IN_SYSTEM_CYCLES; /* Set the timer's next period, so we sample each 20us */
+    CODEC_TIMER_SAMPLING.CTRLA = TC_CLKSEL_DIV1_gc;  /* Select the system clock (with no prescaler) as the timer source */
+    CODEC_TIMER_SAMPLING.CTRLD = TC_EVACT_OFF_gc; /* Turn of any event actions */
+    CODEC_TIMER_SAMPLING.INTCTRLA = TC_OVFINTLVL_HI_gc; /* Mark timer overflow interrupt as high level */
+    CODEC_TIMER_SAMPLING.INTFLAGS = TC0_OVFIF_bm; /* Clear timer overflow interrupt flag */
 
     /* Disable this interrupt. From now on we will sample the field using our CODEC_TIMER_SAMPLING */
     CODEC_DEMOD_IN_PORT.INT0MASK = 0;
@@ -283,12 +256,6 @@ void demodulate_reader_bit(void){
 
     SampleRegister = (SampleRegister << 1) | (!SamplePin ? 0x01 : 0x00);
 
-    if (SampleIdxRegister > 5) {
-        // No more bits to be read or an error occurred during transmission as 4x HIGH should not happen
-        /* No carrier modulation for 3 sample points. EOC! */
-        ISO14443_F_DEMOD_END();
-    }
-
     if (!(SampleRegister & 0x1)) { // if last read bit is a zero
         if (!(SampleRegister ^ 0x1E)) {
             // We have read a 1
@@ -299,36 +266,37 @@ void demodulate_reader_bit(void){
             set_bit_on_position_in_buffer_to_value(CodecBuffer, BitCount, 0);
             BitCount++;
         } else {
-//            ISO14443_F_GARBAGE(); //TODO: Handle this case?
+            ISO14443_F_GARBAGE();
         }
         SampleRegister = 0;
         SampleIdxRegister = 0;
     }
 
+    if (SampleIdxRegister > 4) {
+
+        // No more bits to be read or an error occurred during transmission as 5x HIGH should not happen
+        if (BitCount > 0){
+            ISO14443_F_DEMOD_END();
+        } else {
+            ISO14443_F_GARBAGE();
+        }
+    }
 }
 
 //This triggers every 20us
-ISR_SHARED isr_ISO14443_F_CODEC_TIMER_SAMPLING_CCA_VECT(void){
-    set_PE0_high();
+ISR_SHARED isr_ISO14443_F_CODEC_TIMER_SAMPLING_OVF_VECT(void){
+    CODEC_TIMER_SAMPLING.INTFLAGS = TC0_OVFIF_bm; /* Clear timer overflow interrupt flag */
 
-    if (ReceiveStateRegister == DO_RECEIVE) {
-        /* Tohle funguje hezky, neměnit*/
-        demodulate_reader_bit();
-        /* Make sure the sampling timer gets automatically aligned to the
-         * modulation pauses by using the RESTART event.
-         * This can be understood as a "poor man's phase locked loop" and makes sure that we are
-         * never too far out the bit-grid while sampling. */
-        // v ^              Reset here            Reset here     Reset here
-        // o |                   |                     |              |
-        // l |                   V                     V              V
-        // t |--------------|    +----------------+    +--------+     +-
-        // a |              |    |                |    |        |     |
-        // g |              |    |                |    |        |     |
-        // e |              |----|                +----+        +-----+
-        //   +------------------------------------------------------------> time
-        CODEC_TIMER_SAMPLING.CTRLD = TC_EVACT_RESTART_gc | CODEC_TIMER_MODEND_EVSEL;
+    if (Flags.PRNGInitialized){
+        Flags.TickCounter++;
+        if (Flags.TickCounter == 5){
+//            LegicPrimePRNGAdvance(1);
+            Flags.TickCounter = 0;
+        }
     }
-    set_PE0_low();
+    if (ReceiveStateRegister == DO_RECEIVE) {
+        demodulate_reader_bit();
+    }
 
 }
 
@@ -400,6 +368,7 @@ void ISO14443FCodecInit(void) {
     ReceiveStateRegister = DONT_RECEIVE;
 
     isr_func_CODEC_DEMOD_IN_INT0_VECT = &isr_ISO14443_F_CODEC_DEMOD_IN_INT0_VECT;
+    isr_func_CODEC_TIMER_SAMPLING_OVF_vect = &isr_ISO14443_F_CODEC_TIMER_SAMPLING_OVF_VECT;
     isr_func_CODEC_TIMER_LOADMOD_OVF_VECT = &isr_ISO14443_F_CODEC_TIMER_LOADMOD_OVF_VECT;
     isr_func_CODEC_TIMER_SAMPLING_CCA_vect = &isr_ISO14443_F_CODEC_TIMER_SAMPLING_CCA_VECT;
     CodecInitCommon();
