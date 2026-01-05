@@ -544,7 +544,7 @@ ISR(CODEC_TIMER_LOADMOD_CCC_VECT) {
  * This interrupt handles the VICC SOF timeout when the card does not answer
  * and restarts reader sniffing
  */
-ISR(CODEC_TIMER_SAMPLING_OVF_VECT) {
+ISR_SHARED isr_SNIFF_ISO15693_CODEC_TIMER_SAMPLING_OVF_VECT(void) {
     Flags.CardDemodFinished = 1;
 
     /* Call cleanup function */
