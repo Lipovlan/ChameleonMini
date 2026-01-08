@@ -117,7 +117,6 @@ INLINE void ISO14443_F_DEMOD_END(void) {
     CODEC_TIMER_LOADMOD.INTFLAGS = TC0_OVFIF_bm; /* Clear overflow interrupt flag */
     CODEC_TIMER_LOADMOD.INTCTRLA = TC_OVFINTLVL_HI_gc; /* Set overflow interrupt level to high */
 
-    TransmitStateRegister = TRANSMIT_START;
     ReceiveStateRegister = END_RECEIVE;
 
 }
