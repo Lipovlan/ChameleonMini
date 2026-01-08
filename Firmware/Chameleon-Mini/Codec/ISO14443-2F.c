@@ -101,7 +101,7 @@ INLINE void set_PE0_low(void){
 
 /* Handles the end of reading data from the reader when the physical layer data make sense */
 INLINE void ISO14443_F_DEMOD_END(void) {
-    SampleIdxRegister = 0;
+    ReceiveStateRegister = END_RECEIVE;
     /* Disable demodulation interrupt */
     CODEC_TIMER_SAMPLING.CTRLA = TC_CLKSEL_OFF_gc; /* Disconnect system clock from demod timer */
     CODEC_TIMER_SAMPLING.INTCTRLB = TC_OVFINTLVL_OFF_gc; /* Disable OVF interrupts */
@@ -116,9 +116,6 @@ INLINE void ISO14443_F_DEMOD_END(void) {
     CODEC_TIMER_LOADMOD.PER = FIRST_TRANSMIT_OFFSET_IN_SYSTEM_CYCLES; /* +- 320 microseconds offset from now */
     CODEC_TIMER_LOADMOD.INTFLAGS = TC0_OVFIF_bm; /* Clear overflow interrupt flag */
     CODEC_TIMER_LOADMOD.INTCTRLA = TC_OVFINTLVL_HI_gc; /* Set overflow interrupt level to high */
-
-    ReceiveStateRegister = END_RECEIVE;
-
 }
 
 // v ^                                          Trigger here
@@ -138,7 +135,6 @@ void EnableFirstModulationPauseInterrupt(void){
 
 /* Handles the end of reading data from the reader when the physical layer data don't make sense */
 INLINE void ISO14443_F_GARBAGE(void){
-    SampleIdxRegister = 0;
     CODEC_TIMER_SAMPLING.CTRLA = TC_CLKSEL_OFF_gc; /* Disconnect system clock from demod timer */
     CODEC_TIMER_SAMPLING.INTCTRLB = TC_OVFINTLVL_OFF_gc; /* Disable CCA interrupts */
     CODEC_TIMER_SAMPLING.INTFLAGS = TC0_OVFIF_bm; /* Clear OVF interrupt flag */
@@ -163,7 +159,6 @@ INLINE void StartDemod(void) {
     CodecSetDemodPower(true);
     ReceiveStateRegister = DO_RECEIVE;
     SampleRegister = 0;
-    SampleIdxRegister = 0;
     BitCount = 0;
 
     EnableFirstModulationPauseInterrupt();
@@ -201,6 +196,7 @@ ISR_SHARED isr_ISO14443_2F_CODEC_DEMOD_IN_INT0_VECT(void) {
 
     /* Disable this interrupt. From now on we will sample the field using our CODEC_TIMER_SAMPLING OVF interrupt */
     CODEC_DEMOD_IN_PORT.INT0MASK = 0;
+    SampleIdxRegister = 0;
 
 }
 INLINE void DisableLoadmodTimer(void){
