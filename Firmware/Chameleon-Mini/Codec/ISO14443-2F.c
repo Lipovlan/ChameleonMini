@@ -104,10 +104,9 @@ INLINE void ISO14443_F_DEMOD_END(void) {
     SampleIdxRegister = 0;
     /* Disable demodulation interrupt */
     CODEC_TIMER_SAMPLING.CTRLA = TC_CLKSEL_OFF_gc; /* Disconnect system clock from demod timer */
-    CODEC_TIMER_SAMPLING.CTRLD = TC_EVACT_OFF_gc; /* Remove action from timer */
-    CODEC_TIMER_SAMPLING.INTCTRLB = TC_CCAINTLVL_OFF_gc; /* Disable CCA interrupts */
-    CODEC_TIMER_SAMPLING.INTFLAGS = TC0_CCAIF_bm; /* Clear CCA interrupt flag */
-
+    CODEC_TIMER_SAMPLING.INTCTRLB = TC_OVFINTLVL_OFF_gc; /* Disable OVF interrupts */
+    CODEC_TIMER_SAMPLING.INTFLAGS = TC0_OVFIF_bm; /* Clear OVF interrupt flag */
+    }
     /* By this time, the LOADMOD timer is aligned to the last modulation
      * edge of the reader. So we disable the auto-synchronization and
      * let it count the frame delay time in the background, and generate
@@ -142,7 +141,6 @@ void EnableFirstModulationPauseInterrupt(void){
 INLINE void ISO14443_F_GARBAGE(void){
     SampleIdxRegister = 0;
     CODEC_TIMER_SAMPLING.CTRLA = TC_CLKSEL_OFF_gc; /* Disconnect system clock from demod timer */
-    CODEC_TIMER_SAMPLING.CTRLD = TC_EVACT_OFF_gc; /* Remove action from timer */
     CODEC_TIMER_SAMPLING.INTCTRLB = TC_OVFINTLVL_OFF_gc; /* Disable CCA interrupts */
     CODEC_TIMER_SAMPLING.INTFLAGS = TC0_OVFIF_bm; /* Clear OVF interrupt flag */
     EnableFirstModulationPauseInterrupt(); /* Start listening for the reader's field changes again */
@@ -199,7 +197,6 @@ ISR_SHARED isr_ISO14443_2F_CODEC_DEMOD_IN_INT0_VECT(void) {
     CODEC_TIMER_SAMPLING.PER = FIRST_SAMPLING_OFFSET_IN_SYSTEM_CYCLES; /* Set the timer's period, so we land +-10us into readers data signal */
     CODEC_TIMER_SAMPLING.PERBUF = READER_SIGNAL_SAMPLE_RATE_IN_SYSTEM_CYCLES; /* Set the timer's next period, so we sample each 20us */
     CODEC_TIMER_SAMPLING.CTRLA = TC_CLKSEL_DIV1_gc;  /* Select the system clock (with no prescaler) as the timer source */
-    CODEC_TIMER_SAMPLING.CTRLD = TC_EVACT_OFF_gc; /* Turn of any event actions */
     CODEC_TIMER_SAMPLING.INTCTRLA = TC_OVFINTLVL_HI_gc; /* Mark timer overflow interrupt as high level */
     CODEC_TIMER_SAMPLING.INTFLAGS = TC0_OVFIF_bm; /* Clear timer overflow interrupt flag */
 
@@ -317,13 +314,15 @@ TRANSMIT_END_LABEL:
 }
 
 void ISO14443FCodecInit(void) {
-    /* Initialize some global vars and start looking out for reader commands */
-    ReceiveStateRegister = DONT_RECEIVE;
-    TransmitStateRegister = TRANSMIT_NONE;
+    /* Clear all that matters */
+    ISO14443FCodecDeInit();
 
+    /* Bind interrupt handlers to shared interrupt vectors */
     isr_func_CODEC_DEMOD_IN_INT0_VECT = &isr_ISO14443_2F_CODEC_DEMOD_IN_INT0_VECT;
     isr_func_CODEC_TIMER_SAMPLING_OVF_vect = &isr_ISO14443_2F_CODEC_TIMER_SAMPLING_OVF_VECT;
     isr_func_CODEC_TIMER_LOADMOD_OVF_VECT = &isr_ISO14443_2F_CODEC_TIMER_LOADMOD_OVF_VECT;
+
+    /* Start to listen for reader's data */
     CodecInitCommon();
     StartDemod();
 }
@@ -337,8 +336,8 @@ void ISO14443FCodecDeInit(void) {
 
     CODEC_TIMER_SAMPLING.CTRLA = TC_CLKSEL_OFF_gc;
     CODEC_TIMER_SAMPLING.CTRLD = TC_EVACT_OFF_gc;
-    CODEC_TIMER_SAMPLING.INTCTRLB = TC_CCAINTLVL_OFF_gc;
-    CODEC_TIMER_SAMPLING.INTFLAGS = TC0_CCAIF_bm;
+    CODEC_TIMER_SAMPLING.INTCTRLB = TC_OVFINTLVL_OFF_gc;
+    CODEC_TIMER_SAMPLING.INTFLAGS = TC0_OVFIF_bm;
 
 
     CODEC_TIMER_LOADMOD.CTRLA = TC_CLKSEL_OFF_gc;
