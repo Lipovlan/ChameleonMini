@@ -21,6 +21,48 @@
 #include "Codec.h"
 #include "Log.h"
 
+/* Set pin PE0 to HIGH - used only for debugging during development */
+INLINE void set_PE0_high(void){
+    PORTE.DIRSET |= PIN0_bm;
+    PORTE.OUTSET |= PIN0_bm;
+}
+
+/* Set pin PE0 to LOW - used only for debugging during development */
+INLINE void set_PE0_low(void){
+    PORTE.OUTCLR |= PIN0_bm;
+}
+
+// ------------------------ LEGIC PRIME PRNG SECTION -------------------------
+static struct legicPRNG_t {
+    uint8_t a;
+    uint8_t b;
+    size_t step;
+} legicPRNG;
+
+INLINE void LegicPrimePRNGInit(uint8_t iv){
+    legicPRNG.a = iv;
+    legicPRNG.b = (iv << 1) | 1;
+    legicPRNG.step = 0;
+}
+INLINE void LegicPrimePRNGAdvance(size_t steps){
+    legicPRNG.step += steps;
+    set_PE0_high();
+    while(steps--){
+        uint8_t new_b_bit = legicPRNG.b ^ (legicPRNG.b >> 2) ^ (legicPRNG.b >> 3) ^ (legicPRNG.b >> 7);
+        legicPRNG.b = (new_b_bit << 7) | (legicPRNG.b >> 1);
+
+        uint8_t new_a_bit = legicPRNG.a ^ (legicPRNG.a >> 6);
+        legicPRNG.a = (new_a_bit << 6) | legicPRNG.a  >> 1;
+    }
+    set_PE0_low();
+}
+
+uint8_t LegicPrimePRNGGetBit(void){
+    uint8_t index = (legicPRNG.a ^ 0x1C) >> 2; // Flip the bits 2,3 and 4 from a and move them, so they are LSB
+    index = ((index & 4) >> 2) | (index & 2) | ((index & 1) << 2); // Reverse their direction
+    return (legicPRNG.b >> index) & 1; // Select only one bit from b according to index made from a
+}
+
 // ------------------------ LEGIC CODEC SECTION -------------------------------
 // For reading the reader's data:
 // Sampling of the reader is done using internal clock, synchronized to the first field modulation pause.
@@ -94,16 +136,6 @@ typedef enum {
 #define BitSent			CodecCount16Register1
 #define BitCount		CodecCount16Register2
 
-/* Set pin PE0 to HIGH - used only for debugging during development */
-INLINE void set_PE0_high(void){
-    PORTE.DIRSET |= PIN0_bm;
-    PORTE.OUTSET |= PIN0_bm;
-}
-
-/* Set pin PE0 to LOW - used only for debugging during development */
-INLINE void set_PE0_low(void){
-    PORTE.OUTCLR |= PIN0_bm;
-}
 
 /* Handles the end of reading data from the reader when the physical layer data make sense */
 INLINE void ISO14443_F_DEMOD_END(void) {
@@ -245,10 +277,16 @@ ISR_SHARED isr_ISO14443_2F_CODEC_TIMER_SAMPLING_OVF_VECT(void){
         if (!(SampleRegister ^ 0x1E)) {
             // We have read a 1
             SetBitOnPositionInBufferToValue(CodecBuffer, BitCount, 1);
+            if (legicPRNG.step != 0){
+                LegicPrimePRNGAdvance(1);
+            }
             BitCount++;
         } else if (!(SampleRegister ^ 0x06)) {
             // We have read a 0
             SetBitOnPositionInBufferToValue(CodecBuffer, BitCount, 0);
+            if (legicPRNG.step != 0){
+                LegicPrimePRNGAdvance(1);
+            }
             BitCount++;
         } else {
             ISO14443_F_GARBAGE();
@@ -295,6 +333,9 @@ TRANSMIT_START_LABEL:
     /* Fallthrough */
 TRANSMIT_BIT_LABEL:
     CodecSetLoadmodState(GetBitOnPositionInBuffer(CodecBuffer, BitSent));
+    uint8_t unmasked = GetBitOnPositionInBuffer(CodecBuffer, BitSent) ^ LegicPrimePRNGGetBit();
+    LegicPrimePRNGAdvance(1);
+    LogEntry(LOG_INFO_APP_CMD_UNKNOWN, &unmasked , 1 );
     BitSent++;
     if (BitSent >= BitCount){
         TransmitStateRegister = TRANSMIT_END;
@@ -329,6 +370,7 @@ void ISO14443FCodecDeInit(void) {
     ReceiveStateRegister = DONT_RECEIVE;
     TransmitStateRegister = TRANSMIT_NONE;
 
+    legicPRNG.step = 0;
 
     CODEC_TIMER_SAMPLING.CTRLA = TC_CLKSEL_OFF_gc;
     CODEC_TIMER_SAMPLING.CTRLD = TC_EVACT_OFF_gc;
@@ -351,7 +393,10 @@ void ISO14443FCodecTask(void) {
     if (ReceiveStateRegister == END_RECEIVE) {
         ReceiveStateRegister = DONT_RECEIVE;
         LEDHook(LED_CODEC_RX, LED_PULSE); /* Signal data received */
-
+        if (legicPRNG.step == 0){
+            LegicPrimePRNGInit(*CodecBuffer);
+            LegicPrimePRNGAdvance(2);
+        }
         /* Zero out unused bytes for logging */
         for (uint16_t i = 0; i < (BitCount % 8); i++){
             CodecBuffer[(BitCount + 7) / 8] &= ~(1u << i);
