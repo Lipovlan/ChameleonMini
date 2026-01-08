@@ -8,6 +8,12 @@
  *  Inspired by ISO14443-2A.c and ISO15693.c
  */
 
+/*
+ * Possible changes:
+ * 1) Use reader's signal for sampling timer: CODEC_TIMER_SAMPLING.CTRLA = CODEC_TIMER_CARRIER_CLKSEL
+ *
+ */
+
 #include "ISO14443-2F.h"
 #include "../System.h"
 #include "../Application/Application.h"
@@ -102,11 +108,7 @@ INLINE void set_PE0_low(void){
 /* Handles the end of reading data from the reader when the physical layer data make sense */
 INLINE void ISO14443_F_DEMOD_END(void) {
     ReceiveStateRegister = END_RECEIVE;
-    /* Disable demodulation interrupt */
-    CODEC_TIMER_SAMPLING.CTRLA = TC_CLKSEL_OFF_gc; /* Disconnect system clock from demod timer */
-    CODEC_TIMER_SAMPLING.INTCTRLB = TC_OVFINTLVL_OFF_gc; /* Disable OVF interrupts */
     CODEC_TIMER_SAMPLING.INTFLAGS = TC0_OVFIF_bm; /* Clear OVF interrupt flag */
-    }
     /* By this time, the LOADMOD timer is aligned to the last modulation
      * edge of the reader. So we disable the auto-synchronization and
      * let it count the frame delay time in the background, and generate
@@ -136,7 +138,7 @@ void EnableFirstModulationPauseInterrupt(void){
 /* Handles the end of reading data from the reader when the physical layer data don't make sense */
 INLINE void ISO14443_F_GARBAGE(void){
     CODEC_TIMER_SAMPLING.CTRLA = TC_CLKSEL_OFF_gc; /* Disconnect system clock from demod timer */
-    CODEC_TIMER_SAMPLING.INTCTRLB = TC_OVFINTLVL_OFF_gc; /* Disable CCA interrupts */
+    CODEC_TIMER_SAMPLING.INTCTRLB = TC_OVFINTLVL_OFF_gc; /* Disable OVF interrupts */
     CODEC_TIMER_SAMPLING.INTFLAGS = TC0_OVFIF_bm; /* Clear OVF interrupt flag */
     EnableFirstModulationPauseInterrupt(); /* Start listening for the reader's field changes again */
 }
@@ -157,7 +159,6 @@ INLINE void StartDemod(void) {
 
     /* Activate Power for demodulator */
     CodecSetDemodPower(true);
-    ReceiveStateRegister = DO_RECEIVE;
     SampleRegister = 0;
     BitCount = 0;
 
@@ -197,8 +198,9 @@ ISR_SHARED isr_ISO14443_2F_CODEC_DEMOD_IN_INT0_VECT(void) {
     /* Disable this interrupt. From now on we will sample the field using our CODEC_TIMER_SAMPLING OVF interrupt */
     CODEC_DEMOD_IN_PORT.INT0MASK = 0;
     SampleIdxRegister = 0;
-
+    ReceiveStateRegister = DO_RECEIVE;
 }
+
 INLINE void DisableLoadmodTimer(void){
     CODEC_TIMER_LOADMOD.CTRLA = TC_CLKSEL_OFF_gc;
     CODEC_TIMER_LOADMOD.INTCTRLA = TC_OVFINTLVL_OFF_gc;
@@ -303,7 +305,6 @@ TRANSMIT_END_LABEL:
     TransmitStateRegister = TRANSMIT_NONE;
     CodecSetLoadmodState(false);
     CodecSetSubcarrier(CODEC_SUBCARRIERMOD_OFF, 0);
-
     DisableLoadmodTimer();
     StartDemod();
 }
@@ -348,6 +349,7 @@ void ISO14443FCodecDeInit(void) {
 
 void ISO14443FCodecTask(void) {
     if (ReceiveStateRegister == END_RECEIVE) {
+        ReceiveStateRegister = DONT_RECEIVE;
         LEDHook(LED_CODEC_RX, LED_PULSE); /* Signal data received */
 
         /* Zero out unused bytes for logging */
@@ -361,7 +363,6 @@ void ISO14443FCodecTask(void) {
         AnswerBitCount = ApplicationProcess(CodecBuffer, BitCount);
 
         if (AnswerBitCount != ISO14443F_APP_NO_RESPONSE) {
-            ReceiveStateRegister = DONT_RECEIVE;
             LogEntry(LOG_INFO_CODEC_TX_DATA, CodecBuffer, (AnswerBitCount + 7) / 8);
             BitCount = AnswerBitCount;
             TransmitStateRegister = TRANSMIT_START;
