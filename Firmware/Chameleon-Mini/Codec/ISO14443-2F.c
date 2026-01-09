@@ -32,6 +32,33 @@ INLINE void set_PE0_low(void){
     PORTE.OUTCLR |= PIN0_bm;
 }
 
+// Enum for states of the recieve functions that demodulate data from the reader
+// The cycle should be DONT -> DO -> END -> DONT
+typedef enum {
+    DONT_RECEIVE,
+    DO_RECEIVE,
+    END_RECEIVE //Give away control after all data have been received
+} ReceiveStateType;
+
+// Enum for states of the transmit functions that modulate data to the reader
+// The cycle should be NONE -> START -> BIT -> BIT -> ... -> BIT -> END -> NONE
+typedef enum {
+    TRANSMIT_NONE,
+    TRANSMIT_START,
+    TRANSMIT_BIT,
+    TRANSMIT_END
+} TransmitStateType;
+
+/* Define pseudo variables to use fast register access. This is useful for global vars */
+#define ReceiveStateRegister	Codec8Reg0
+#define TransmitStateRegister	Codec8Reg1
+#define SampleIdxRegister Codec8Reg2
+#define SampleRegister	Codec8Reg3
+#define BitSent			CodecCount16Register1
+#define BitCount		CodecCount16Register2
+// WARNING, do not use CodecPtrRegister1 with PrngSubStep at the same time, they are in the same memory
+#define PrngSubStep     GPIOR8
+
 // ------------------------ LEGIC PRIME PRNG SECTION -------------------------
 static struct legicPRNG_t {
     uint8_t a;
@@ -46,6 +73,7 @@ INLINE void LegicPrimePRNGInit(uint8_t iv){
 }
 INLINE void LegicPrimePRNGAdvance(size_t steps){
     legicPRNG.step += steps;
+    PrngSubStep = 0;
     set_PE0_high();
     while(steps--){
         uint8_t new_b_bit = legicPRNG.b ^ (legicPRNG.b >> 2) ^ (legicPRNG.b >> 3) ^ (legicPRNG.b >> 7);
@@ -110,31 +138,6 @@ uint8_t LegicPrimePRNGGetBit(void){
 
 //This is +-320 microseconds
 #define FIRST_TRANSMIT_OFFSET_IN_SYSTEM_CYCLES 4334
-
-// Enum for states of the recieve functions that demodulate data from the reader
-// The cycle should be DONT -> DO -> END -> DONT
-typedef enum {
-    DONT_RECEIVE,
-    DO_RECEIVE,
-    END_RECEIVE //Give away control after all data have been received
-} ReceiveStateType;
-
-// Enum for states of the transmit functions that modulate data to the reader
-// The cycle should be NONE -> START -> BIT -> BIT -> ... -> BIT -> END -> NONE
-typedef enum {
-    TRANSMIT_NONE,
-    TRANSMIT_START,
-    TRANSMIT_BIT,
-    TRANSMIT_END
-} TransmitStateType;
-
-/* Define pseudo variables to use fast register access. This is useful for global vars */
-#define ReceiveStateRegister	Codec8Reg0
-#define TransmitStateRegister	Codec8Reg1
-#define SampleIdxRegister Codec8Reg2
-#define SampleRegister	Codec8Reg3
-#define BitSent			CodecCount16Register1
-#define BitCount		CodecCount16Register2
 
 
 /* Handles the end of reading data from the reader when the physical layer data make sense */
@@ -263,6 +266,12 @@ uint8_t GetBitOnPositionInBuffer(const uint8_t * buffer, uint16_t position){
 // if 4 highs and a low are observed, it stores a logical 1 into CodecBuffer
 ISR_SHARED isr_ISO14443_2F_CODEC_TIMER_SAMPLING_OVF_VECT(void){
     if (ReceiveStateRegister != DO_RECEIVE) {
+        if (TransmitStateRegister == TRANSMIT_NONE || TransmitStateRegister == TRANSMIT_START) {
+            PrngSubStep++;
+            if (PrngSubStep == 5) {
+                LegicPrimePRNGAdvance(1);
+            }
+        }
         return;
     }
     SampleIdxRegister++;
@@ -371,6 +380,7 @@ void ISO14443FCodecDeInit(void) {
     TransmitStateRegister = TRANSMIT_NONE;
 
     legicPRNG.step = 0;
+    PrngSubStep = 0;
 
     CODEC_TIMER_SAMPLING.CTRLA = TC_CLKSEL_OFF_gc;
     CODEC_TIMER_SAMPLING.CTRLD = TC_EVACT_OFF_gc;
@@ -395,7 +405,7 @@ void ISO14443FCodecTask(void) {
         LEDHook(LED_CODEC_RX, LED_PULSE); /* Signal data received */
         if (legicPRNG.step == 0){
             LegicPrimePRNGInit(*CodecBuffer);
-            LegicPrimePRNGAdvance(2);
+//            LegicPrimePRNGAdvance(6);
         }
         /* Zero out unused bytes for logging */
         for (uint16_t i = 0; i < (BitCount % 8); i++){
