@@ -300,20 +300,20 @@ ISR_SHARED isr_ISO14443_2F_CODEC_TIMER_SAMPLING_OVF_VECT(void){
         //SynchronizeSamplingTimerToDemodEnd();
         if (!(SampleRegister ^ 0x1E)) {
             // We have read a 1
-            SetBitOnPositionInBufferToValue(CodecBuffer, BitCount, 1);
             if (legicPRNG.step != 0){
                 LegicPrimePRNGAdvance(1);
             }
             uint8_t unmasked = 1 ^ LegicPrimePRNGGetBit();
+            SetBitOnPositionInBufferToValue(CodecBuffer, BitCount, unmasked);
             LogEntry(LOG_INFO_CODEC_SNI_READER_DATA, &unmasked , 1 );
             BitCount++;
         } else if (!(SampleRegister ^ 0x06)) {
             // We have read a 0
-            SetBitOnPositionInBufferToValue(CodecBuffer, BitCount, 0);
             if (legicPRNG.step != 0){
                 LegicPrimePRNGAdvance(1);
             }
             uint8_t unmasked = 0 ^ LegicPrimePRNGGetBit();
+            SetBitOnPositionInBufferToValue(CodecBuffer, BitCount, unmasked);
             LogEntry(LOG_INFO_CODEC_SNI_READER_DATA, &unmasked , 1 );
             BitCount++;
         } else {
@@ -375,7 +375,7 @@ TRANSMIT_BIT_LABEL:
 
 TRANSMIT_END_LABEL:
     TransmitStateRegister = TRANSMIT_NONE;
-    LegicPrimePRNGAdvance(3);
+    LegicPrimePRNGAdvance(0);
     CodecSetLoadmodState(false);
     CodecSetSubcarrier(CODEC_SUBCARRIERMOD_OFF, 0);
     DisableLoadmodTimer();
@@ -428,7 +428,8 @@ void ISO14443FCodecTask(void) {
         LEDHook(LED_CODEC_RX, LED_PULSE); /* Signal data received */
         if (legicPRNG.step == 0){
             LegicPrimePRNGInit(*CodecBuffer);
-            LegicPrimePRNGAdvance(0);
+//            LegicPrimePRNGAdvance(3);
+//            LegicPrimePRNGRetreat(3);
         }
         /* Zero out unused bytes for logging */
         for (uint16_t i = 0; i < (BitCount % 8); i++){
@@ -447,6 +448,7 @@ void ISO14443FCodecTask(void) {
         } else {
             /* No data to be processed. Disable loadmodding and start listening again */
             DisableLoadmodTimer();
+            LegicPrimePRNGAdvance(1);
             StartDemod();
         }
     }
