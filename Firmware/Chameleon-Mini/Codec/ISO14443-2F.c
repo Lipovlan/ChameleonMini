@@ -75,12 +75,26 @@ INLINE void LegicPrimePRNGAdvance(size_t steps){
     legicPRNG.step += steps;
     PrngSubStep = 0;
     while(steps--){
+        uint8_t new_a_bit = legicPRNG.a ^ (legicPRNG.a >> 6);
+        legicPRNG.a = ((new_a_bit << 6) | legicPRNG.a  >> 1) & 0x7F;
+
+        set_PE0_high();
         uint8_t new_b_bit = legicPRNG.b ^ (legicPRNG.b >> 2) ^ (legicPRNG.b >> 3) ^ (legicPRNG.b >> 7);
         legicPRNG.b = (new_b_bit << 7) | (legicPRNG.b >> 1);
-        set_PE0_high();
+        set_PE0_low();
+    }
+}
 
-        uint8_t new_a_bit = legicPRNG.a ^ (legicPRNG.a >> 6);
-        legicPRNG.a = (new_a_bit << 6) | legicPRNG.a  >> 1;
+INLINE void LegicPrimePRNGRetreat(size_t steps){
+    legicPRNG.step -= steps;
+    PrngSubStep = 0;
+    while(steps--){
+        uint8_t old_a_bit = ((legicPRNG.a >> 5) ^ (legicPRNG.a >> 6)) & 0x01;
+        legicPRNG.a = (legicPRNG.a  << 1 | old_a_bit) & 0x7F;
+
+        set_PE0_high();
+        uint8_t old_b_bit = ((legicPRNG.b >> 7) ^ (legicPRNG.b >> 6) ^ (legicPRNG.b >> 2) ^ (legicPRNG.b >> 1)) & 0x01;
+        legicPRNG.b = legicPRNG.b << 1 | old_b_bit;
         set_PE0_low();
     }
 }
