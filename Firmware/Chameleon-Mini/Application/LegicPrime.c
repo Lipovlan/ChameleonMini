@@ -5,7 +5,7 @@
  *      Author: Ladislav Marko
  *  Inspired by MifareClassic.c
  */
-#if defined(CONFIG_LEGIC_PRIME_SUPPORT)
+//#if defined(CONFIG_LEGIC_PRIME_SUPPORT)
 
 #include "LegicPrime.h"
 
@@ -36,6 +36,22 @@ char legic_log_str[64];
  * */
 uint8_t response_index;
 
+uint8_t calculateTransportCRC(uint8_t data){
+    switch(data){
+        case 0x81:
+            return 0xA;
+        case 0xAB:
+            return 0x1;
+        case 0xB8:
+            return 0x8;
+        case 0x4A:
+            return 0xE;
+        case 0xA7:
+            return 0x0;
+        default:
+            return 0xF;
+    }
+}
 uint16_t LegicPrimeAppProcess(uint8_t *Buffer, uint16_t BitCount) {
 
     uint8_t tmpbf[] = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0};
@@ -45,34 +61,32 @@ uint16_t LegicPrimeAppProcess(uint8_t *Buffer, uint16_t BitCount) {
             return ISO14443F_APP_NO_RESPONSE;
         case 7:
             // Probably start of setup phase
-            MemoryReadBlock(tmpbf, MEM_REPLAY_ADDRESS, 1);
-            memcpy(Buffer, tmpbf, 1);
+            //Type frame
+            Buffer[0] = 0x1D; //0xd for MIM22, 0x1D for MIM256, 0x3D for MIM1024
             return 6;
         case 6:
             // Probably end of setup phase
             return ISO14443F_APP_NO_RESPONSE;
         case 9:
             // Probably reading MIM256 card
+            if (GetBitOnPositionInBuffer(Buffer, 0)){
+                //Read command
+                uint8_t address = ExtractByteFromPositionInBuffer(Buffer, 1);
+                sprintf(legic_log_str, "Address is %d", address);
+                LogEntry(LOG_INFO_GENERIC, legic_log_str, strlen(legic_log_str));
+                MemoryReadBlock(Buffer, MEM_UID_ADDRESS + address, 1);
+                Buffer[1] = calculateTransportCRC(Buffer[0]);
+                return 12;
+            } else {
+                //Write command
+                //TODO: Implement
+                return ISO14443F_APP_NO_RESPONSE;
+            }
             // Fallthrough to case 11
         case 11:
             // Probably reading MIM1024 card
-            switch(response_index){
-                case 0:
-                case 1:
-                case 2:
-                case 3:
-                case 4:
-                    MemoryReadBlock(tmpbf, MEM_REPLAY_ADDRESS + 1  + (response_index * 2), 2);
-                    response_index++;
-                    break;
-                default:
-                    sprintf(legic_log_str, "Legic APP Processing response index that is too high");
-                    LogEntry(LOG_INFO_GENERIC, legic_log_str, strlen(legic_log_str));
-                    return ISO14443F_APP_NO_RESPONSE;
-            }
-
-            memcpy(Buffer, tmpbf, 2);
-            return 12;
+            //TODO: Implement
+            return ISO14443F_APP_NO_RESPONSE;
         default:
             sprintf(legic_log_str, "Legic APP Processing unknown response");
             LogEntry(LOG_INFO_GENERIC, legic_log_str, strlen(legic_log_str));
@@ -98,16 +112,12 @@ void LegicPrimeAppInit(void) {
     sprintf(legic_log_str, "LEGIC APP INIT");
     LogEntry(LOG_INFO_GENERIC, legic_log_str, strlen(legic_log_str));
 
-    // Prepare some captured communication beforehand or upload through the SEND/UPLOAD terminal functionality
-    // Card ID: 0x81 0xAB 0xB8 0x4A
-    uint8_t capture[] = {0x19, 0x27, 0xb, 0x9b, 0x1, 0xa1, 0x1, 0x6d, 0xa, 0x52, 0x3};
-    // Card ID: 0x57 0x46 0x5f 0x85
-    //uint8_t capture[] =  {0x39, 0x3e, 0x5, 0x45, 0x5, 0xfb, 0x2, 0x41, 0x0, 0xac, 0xc};
-    MemoryWriteBlock(capture, MEM_REPLAY_ADDRESS, 11);
+    uint8_t card_memory[] = {0x81, 0xAB, 0xB8, 0x4A, 0xA7};
+    MemoryWriteBlock(card_memory, MEM_UID_ADDRESS, 5);
 
 }
 
 void LegicPrimeAppReset(void) {
     response_index = 0;
 }
-#endif
+//#endif

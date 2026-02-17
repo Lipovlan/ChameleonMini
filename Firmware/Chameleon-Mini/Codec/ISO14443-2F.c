@@ -255,23 +255,6 @@ INLINE void DisableLoadmodTimer(void){
     CODEC_TIMER_LOADMOD.INTCTRLA = TC_OVFINTLVL_OFF_gc;
 }
 
-INLINE void SetBitOnPositionInBufferToValue(volatile uint8_t * buffer, uint16_t position, uint8_t value){
-    uint16_t byte_offset = position / 8;
-    uint8_t bit_offset = position % 8;
-
-    if (value){
-        buffer[byte_offset] |= (1 << bit_offset);        // Set bit to 1
-    } else {
-        buffer[byte_offset] &= ~(1 << bit_offset);       // Set bit to 0
-    }
-}
-
-uint8_t GetBitOnPositionInBuffer(const uint8_t * buffer, uint16_t position){
-    uint16_t byte_offset = position / 8;
-    uint8_t bit_offset = position % 8;
-
-    return (buffer[byte_offset] & (1 << bit_offset)) >> bit_offset;
-}
 
 
 // This triggers every 20us and samples the readers field
@@ -305,7 +288,7 @@ ISR_SHARED isr_ISO14443_2F_CODEC_TIMER_SAMPLING_OVF_VECT(void){
             }
             uint8_t unmasked = 1 ^ LegicPrimePRNGGetBit();
             SetBitOnPositionInBufferToValue(CodecBuffer, BitCount, unmasked);
-            LogEntry(LOG_INFO_CODEC_SNI_READER_DATA, &unmasked , 1 );
+//            LogEntry(LOG_INFO_CODEC_SNI_READER_DATA, &unmasked , 1 );
             BitCount++;
         } else if (!(SampleRegister ^ 0x06)) {
             // We have read a 0
@@ -314,7 +297,7 @@ ISR_SHARED isr_ISO14443_2F_CODEC_TIMER_SAMPLING_OVF_VECT(void){
             }
             uint8_t unmasked = 0 ^ LegicPrimePRNGGetBit();
             SetBitOnPositionInBufferToValue(CodecBuffer, BitCount, unmasked);
-            LogEntry(LOG_INFO_CODEC_SNI_READER_DATA, &unmasked , 1 );
+//            LogEntry(LOG_INFO_CODEC_SNI_READER_DATA, &unmasked , 1 );
             BitCount++;
         } else {
             ISO14443_F_GARBAGE();
@@ -362,11 +345,11 @@ TRANSMIT_START_LABEL:
     CodecSetSubcarrier(CODEC_SUBCARRIERMOD_OOK, ISO14443F_SUBCARRIER_DIVIDER);
     CodecStartSubcarrier();
     /* Fallthrough */
-TRANSMIT_BIT_LABEL:
-    CodecSetLoadmodState(GetBitOnPositionInBuffer(CodecBuffer, BitSent));
-    uint8_t unmasked = GetBitOnPositionInBuffer(CodecBuffer, BitSent) ^ LegicPrimePRNGGetBit();
+TRANSMIT_BIT_LABEL:;
+    uint8_t masked = GetBitOnPositionInBuffer(CodecBuffer, BitSent) ^ LegicPrimePRNGGetBit();
+    CodecSetLoadmodState(masked);
     LegicPrimePRNGAdvance(1);
-    LogEntry(LOG_INFO_CODEC_SNI_CARD_DATA, &unmasked , 1 );
+//    LogEntry(LOG_INFO_CODEC_SNI_CARD_DATA, &masked , 1 );
     BitSent++;
     if (BitSent >= BitCount){
         TransmitStateRegister = TRANSMIT_END;
@@ -448,7 +431,7 @@ void ISO14443FCodecTask(void) {
         } else {
             /* No data to be processed. Disable loadmodding and start listening again */
             DisableLoadmodTimer();
-            LegicPrimePRNGAdvance(1);
+//            LegicPrimePRNGAdvance(1);
             StartDemod();
         }
     }
