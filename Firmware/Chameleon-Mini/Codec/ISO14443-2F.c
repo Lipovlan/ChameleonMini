@@ -74,15 +74,15 @@ INLINE void LegicPrimePRNGInit(uint8_t iv){
 INLINE void LegicPrimePRNGAdvance(size_t steps){
     legicPRNG.step += steps;
     PrngSubStep = 0;
-    set_PE0_high();
     while(steps--){
         uint8_t new_b_bit = legicPRNG.b ^ (legicPRNG.b >> 2) ^ (legicPRNG.b >> 3) ^ (legicPRNG.b >> 7);
         legicPRNG.b = (new_b_bit << 7) | (legicPRNG.b >> 1);
+        set_PE0_high();
 
         uint8_t new_a_bit = legicPRNG.a ^ (legicPRNG.a >> 6);
         legicPRNG.a = (new_a_bit << 6) | legicPRNG.a  >> 1;
+        set_PE0_low();
     }
-    set_PE0_low();
 }
 
 uint8_t LegicPrimePRNGGetBit(void){
@@ -266,6 +266,7 @@ uint8_t GetBitOnPositionInBuffer(const uint8_t * buffer, uint16_t position){
 // if 4 highs and a low are observed, it stores a logical 1 into CodecBuffer
 ISR_SHARED isr_ISO14443_2F_CODEC_TIMER_SAMPLING_OVF_VECT(void){
     if (ReceiveStateRegister != DO_RECEIVE) {
+        // This handles transition from sending to receiving
         if (TransmitStateRegister == TRANSMIT_NONE || TransmitStateRegister == TRANSMIT_START) {
             PrngSubStep++;
             if (PrngSubStep == 5) {
@@ -289,6 +290,8 @@ ISR_SHARED isr_ISO14443_2F_CODEC_TIMER_SAMPLING_OVF_VECT(void){
             if (legicPRNG.step != 0){
                 LegicPrimePRNGAdvance(1);
             }
+            uint8_t unmasked = 1 ^ LegicPrimePRNGGetBit();
+            LogEntry(LOG_INFO_CODEC_SNI_READER_DATA, &unmasked , 1 );
             BitCount++;
         } else if (!(SampleRegister ^ 0x06)) {
             // We have read a 0
@@ -296,6 +299,8 @@ ISR_SHARED isr_ISO14443_2F_CODEC_TIMER_SAMPLING_OVF_VECT(void){
             if (legicPRNG.step != 0){
                 LegicPrimePRNGAdvance(1);
             }
+            uint8_t unmasked = 0 ^ LegicPrimePRNGGetBit();
+            LogEntry(LOG_INFO_CODEC_SNI_READER_DATA, &unmasked , 1 );
             BitCount++;
         } else {
             ISO14443_F_GARBAGE();
@@ -307,6 +312,9 @@ ISR_SHARED isr_ISO14443_2F_CODEC_TIMER_SAMPLING_OVF_VECT(void){
     if (SampleIdxRegister > 4) {
         // No more bits to be read or an error occurred during transmission as 5x HIGH should not happen
         if (BitCount > 0){
+            if (legicPRNG.step != 0){
+                LegicPrimePRNGAdvance(1);
+            }
             ISO14443_F_DEMOD_END();
         } else {
             ISO14443_F_GARBAGE();
@@ -344,7 +352,7 @@ TRANSMIT_BIT_LABEL:
     CodecSetLoadmodState(GetBitOnPositionInBuffer(CodecBuffer, BitSent));
     uint8_t unmasked = GetBitOnPositionInBuffer(CodecBuffer, BitSent) ^ LegicPrimePRNGGetBit();
     LegicPrimePRNGAdvance(1);
-    LogEntry(LOG_INFO_APP_CMD_UNKNOWN, &unmasked , 1 );
+    LogEntry(LOG_INFO_CODEC_SNI_CARD_DATA, &unmasked , 1 );
     BitSent++;
     if (BitSent >= BitCount){
         TransmitStateRegister = TRANSMIT_END;
@@ -353,6 +361,7 @@ TRANSMIT_BIT_LABEL:
 
 TRANSMIT_END_LABEL:
     TransmitStateRegister = TRANSMIT_NONE;
+    LegicPrimePRNGAdvance(3);
     CodecSetLoadmodState(false);
     CodecSetSubcarrier(CODEC_SUBCARRIERMOD_OFF, 0);
     DisableLoadmodTimer();
@@ -405,7 +414,7 @@ void ISO14443FCodecTask(void) {
         LEDHook(LED_CODEC_RX, LED_PULSE); /* Signal data received */
         if (legicPRNG.step == 0){
             LegicPrimePRNGInit(*CodecBuffer);
-//            LegicPrimePRNGAdvance(6);
+            LegicPrimePRNGAdvance(0);
         }
         /* Zero out unused bytes for logging */
         for (uint16_t i = 0; i < (BitCount % 8); i++){
