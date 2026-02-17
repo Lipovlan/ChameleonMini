@@ -432,8 +432,8 @@ void ISO14443FCodecTask(void) {
 //            LegicPrimePRNGRetreat(3);
         }
         /* Zero out unused bytes for logging */
-        for (uint16_t i = 0; i < (BitCount % 8); i++){
-            CodecBuffer[(BitCount + 7) / 8] &= ~(1u << i);
+        for (uint16_t i = (BitCount % 8); i < 8; i++){
+            CodecBuffer[BitCount / 8] &= ~(1u << i);
         }
         LogEntry(LOG_INFO_CODEC_RX_DATA, CodecBuffer, (BitCount+7)/8 );
 
