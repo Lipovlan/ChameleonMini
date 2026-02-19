@@ -21,7 +21,8 @@
 static const MapEntryType PROGMEM ConfigurationMap[] = {
     { .Id = CONFIG_NONE, 			        .Text = "NONE" },
 #ifdef CONFIG_LEGIC_PRIME_SUPPORT
-    { .Id = CONFIG_LEGIC_PRIME, 	             .Text = "LEGIC_PRIME" },
+    { .Id = CONFIG_LEGIC_PRIME_256, 	             .Text = "LEGIC_PRIME_256" },
+    { .Id = CONFIG_LEGIC_PRIME_1024, 	             .Text = "LEGIC_PRIME_1024" },
 #endif
 #ifdef CONFIG_MF_ULTRALIGHT_SUPPORT
     { .Id = CONFIG_MF_ULTRALIGHT, 	             .Text = "MF_ULTRALIGHT" },
@@ -113,20 +114,37 @@ static const PROGMEM ConfigurationType ConfigurationTable[] = {
         .TagFamily = TAG_FAMILY_NONE
     },
 #ifdef CONFIG_LEGIC_PRIME_SUPPORT
-    [CONFIG_LEGIC_PRIME] = {
+    [CONFIG_LEGIC_PRIME_256] = {
             .CodecInitFunc = ISO14443FCodecInit,
             .CodecDeInitFunc = ISO14443FCodecDeInit,
             .CodecTaskFunc = ISO14443FCodecTask,
-            .ApplicationInitFunc = LegicPrimeAppInit,
+            .ApplicationInitFunc = LegicPrimeAppInit256,
             .ApplicationInitRunOnceFunc = ApplicationInitDummy,
-            .ApplicationResetFunc = LegicPrimeAppReset,
+            .ApplicationResetFunc = ApplicationResetDummy,
             .ApplicationTaskFunc = ApplicationTaskDummy,
             .ApplicationTickFunc = ApplicationTickDummy,
             .ApplicationProcessFunc = LegicPrimeAppProcess,
             .ApplicationGetUidFunc = LegicPrimeGetUid,
             .ApplicationSetUidFunc = LegicPrimeSetUid,
             .UidSize = LEGIC_PRIME_UID_SIZE,
-            .MemorySize = LEGIC_PRIME_MEM_SIZE,
+            .MemorySize = LEGIC_PRIME_256_MEM_SIZE,
+            .ReadOnly = false,
+            .TagFamily = TAG_FAMILY_ISO14443F
+    },
+    [CONFIG_LEGIC_PRIME_1024] = {
+            .CodecInitFunc = ISO14443FCodecInit,
+            .CodecDeInitFunc = ISO14443FCodecDeInit,
+            .CodecTaskFunc = ISO14443FCodecTask,
+            .ApplicationInitFunc = LegicPrimeAppInit1024,
+            .ApplicationInitRunOnceFunc = ApplicationInitDummy,
+            .ApplicationResetFunc = ApplicationResetDummy,
+            .ApplicationTaskFunc = ApplicationTaskDummy,
+            .ApplicationTickFunc = ApplicationTickDummy,
+            .ApplicationProcessFunc = LegicPrimeAppProcess,
+            .ApplicationGetUidFunc = LegicPrimeGetUid,
+            .ApplicationSetUidFunc = LegicPrimeSetUid,
+            .UidSize = LEGIC_PRIME_UID_SIZE,
+            .MemorySize = LEGIC_PRIME_1024_MEM_SIZE,
             .ReadOnly = false,
             .TagFamily = TAG_FAMILY_ISO14443F
     },
