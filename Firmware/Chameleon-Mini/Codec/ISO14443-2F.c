@@ -186,10 +186,7 @@ void EnableFirstModulationPauseInterrupt(void){
 
 /* Handles the end of reading data from the reader when the physical layer data don't make sense */
 INLINE void ISO14443_F_GARBAGE(void){
-    CODEC_TIMER_SAMPLING.CTRLA = TC_CLKSEL_OFF_gc; /* Disconnect system clock from demod timer */
-    CODEC_TIMER_SAMPLING.INTCTRLB = TC_OVFINTLVL_OFF_gc; /* Disable OVF interrupts */
-    CODEC_TIMER_SAMPLING.INTFLAGS = TC0_OVFIF_bm; /* Clear OVF interrupt flag */
-    EnableFirstModulationPauseInterrupt(); /* Start listening for the reader's field changes again */
+    CodecInit();
 }
 
 /* Starts Loadmod timer as a free-running timer and syncs it to reader's modulation ends, so it will be accurate when
@@ -384,20 +381,28 @@ void ISO14443FCodecDeInit(void) {
     CODEC_DEMOD_IN_PORT.INT0MASK = 0;
     ReceiveStateRegister = DONT_RECEIVE;
     TransmitStateRegister = TRANSMIT_NONE;
-
-    legicPRNG.step = 0;
+    SampleIdxRegister = 0;
+    SampleRegister = 0;
+    BitSent = 0;
+    BitCount = 0;
     PrngSubStep = 0;
+
+    legicPRNG.a = 0;
+    legicPRNG.b = 0;
+    legicPRNG.step = 0;
 
     CODEC_TIMER_SAMPLING.CTRLA = TC_CLKSEL_OFF_gc;
     CODEC_TIMER_SAMPLING.CTRLD = TC_EVACT_OFF_gc;
     CODEC_TIMER_SAMPLING.INTCTRLB = TC_OVFINTLVL_OFF_gc;
     CODEC_TIMER_SAMPLING.INTFLAGS = TC0_OVFIF_bm;
+    CODEC_TIMER_SAMPLING.CNT = 0;
 
 
     CODEC_TIMER_LOADMOD.CTRLA = TC_CLKSEL_OFF_gc;
     CODEC_TIMER_LOADMOD.CTRLD = TC_EVACT_OFF_gc;
     CODEC_TIMER_LOADMOD.INTCTRLA = TC_OVFINTLVL_OFF_gc;
     CODEC_TIMER_LOADMOD.INTFLAGS = TC0_OVFIF_bm;
+    CODEC_TIMER_LOADMOD.CNT = 0;
 
     CodecSetSubcarrier(CODEC_SUBCARRIERMOD_OFF, 0);
     CodecSetDemodPower(false);
