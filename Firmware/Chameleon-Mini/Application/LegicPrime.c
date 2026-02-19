@@ -21,8 +21,6 @@ char legic_log_str[64];
 #define MEM_BACKUP_ADDRESS      0x0D
 #define MEM_BACKUP_CRC_ADDRESS  0x13
 
-#define MEM_REPLAY_ADDRESS      0x1000
-
 /* LEGIC prime card layout
  * UID [4 Bytes]
  * UID CRC [1 Byte]
@@ -61,6 +59,7 @@ uint8_t reflect8(uint8_t b) {
     return (b * 0x0202020202ULL & 0x010884422010ULL) % 1023;
 }
 
+/* Simplified Proxmark solution */
 uint32_t calculateStorageCRC(uint8_t *buff, size_t size) {
     uint8_t mask = 0xFF;
     uint8_t state = 0x55 & mask;
@@ -81,9 +80,6 @@ uint32_t calculateStorageCRC(uint8_t *buff, size_t size) {
 
 
 uint16_t LegicPrimeAppProcess(uint8_t *Buffer, uint16_t BitCount) {
-
-    uint8_t tmpbf[] = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0};
-
     switch(BitCount){
         case 0:
             return ISO14443F_APP_NO_RESPONSE;
@@ -106,8 +102,6 @@ uint16_t LegicPrimeAppProcess(uint8_t *Buffer, uint16_t BitCount) {
                 long int crc_input = (data << 9) | (Buffer[1] & 0x1) << 8 | Buffer[0];
 
                 /* Now put the data into the shared buffer and send them back to Codec */
-//                sprintf(legic_log_str, "CRC is %x made from %lx", calculateTransportCRC(crc_input, 17),  crc_input);
-//                LogEntry(LOG_INFO_GENERIC, legic_log_str, strlen(legic_log_str));
                 Buffer[0] = data;
                 Buffer[1] = calculateTransportCRC(crc_input, 17);
 
@@ -140,7 +134,6 @@ void LegicPrimeSetUid(ConfigurationUidType Uid) {
     MemoryWriteBlock(Uid, MEM_UID_ADDRESS, LEGIC_PRIME_UID_SIZE);
     uint8_t storage_crc = calculateStorageCRC(Uid, 4);
     MemoryWriteBlock(&storage_crc, MEM_UID_CRC_ADDRESS, 1);
-    //TODO: Write also the LEGIC prime UID CRC to MEM_UID_CRC_ADDRESS
     LogEntry(LOG_INFO_GENERIC, legic_log_str, strlen(legic_log_str));
 }
 
