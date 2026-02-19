@@ -51,7 +51,26 @@ uint8_t calculateTransportCRC(uint8_t data){
         default:
             return 0xF;
     }
+/*
+ * Calculate transport CRC for LEGIC prime
+ *
+ * The CRC is calculated from the readers unmasked command concatenated with the card's data.
+ * */
+uint8_t calculateTransportCRC(long int data, int data_len){
+    int state = 0x05;
+    int polynomial = 0xC;
+    int prev;
+    for(int i = 0; i < data_len; i++){
+        prev = state;
+        state >>= 1;
+        if ((prev ^ data) & 1){
+            state ^= polynomial;
+        }
+        data >>= 1;
+    }
+    return state;
 }
+
 uint16_t LegicPrimeAppProcess(uint8_t *Buffer, uint16_t BitCount) {
 
     uint8_t tmpbf[] = {0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0, 0x0};
@@ -71,11 +90,18 @@ uint16_t LegicPrimeAppProcess(uint8_t *Buffer, uint16_t BitCount) {
             // Probably reading MIM256 card
             if (GetBitOnPositionInBuffer(Buffer, 0)){
                 //Read command
+                /* Retrieve the data from memory and calculate the CRC */
+                long int data = 0;
                 uint8_t address = ExtractByteFromPositionInBuffer(Buffer, 1);
-                sprintf(legic_log_str, "Address is %d", address);
-                LogEntry(LOG_INFO_GENERIC, legic_log_str, strlen(legic_log_str));
-                MemoryReadBlock(Buffer, MEM_UID_ADDRESS + address, 1);
-                Buffer[1] = calculateTransportCRC(Buffer[0]);
+                MemoryReadBlock(&data, MEM_UID_ADDRESS + address, 1);
+                long int crc_input = (data << 9) | (Buffer[1] & 0x1) << 8 | Buffer[0];
+
+                /* Now put the data into the shared buffer and send them back to Codec */
+//                sprintf(legic_log_str, "CRC is %x made from %lx", calculateTransportCRC(crc_input, 17),  crc_input);
+//                LogEntry(LOG_INFO_GENERIC, legic_log_str, strlen(legic_log_str));
+                Buffer[0] = data;
+                Buffer[1] = calculateTransportCRC(crc_input, 17);
+
                 return 12;
             } else {
                 //Write command
