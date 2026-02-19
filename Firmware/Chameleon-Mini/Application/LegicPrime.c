@@ -5,7 +5,7 @@
  *      Author: Ladislav Marko
  *  Inspired by MifareClassic.c
  */
-//#if defined(CONFIG_LEGIC_PRIME_SUPPORT)
+#if defined(CONFIG_LEGIC_PRIME_SUPPORT)
 
 #include "LegicPrime.h"
 
@@ -55,6 +55,30 @@ uint8_t calculateTransportCRC(long int data, int data_len){
     }
     return state;
 }
+
+/* By Rich Schroeppel from HAKMEM */
+uint8_t reflect8(uint8_t b) {
+    return (b * 0x0202020202ULL & 0x010884422010ULL) % 1023;
+}
+
+uint32_t calculateStorageCRC(uint8_t *buff, size_t size) {
+    uint8_t mask = 0xFF;
+    uint8_t state = 0x55 & mask;
+    state = reflect8(state);
+    for (size_t i = 0; i < size; ++i) {
+        uint32_t data = buff[i];
+        data = reflect8(data);
+        state ^= data;
+        for (uint8_t bit = 8; bit > 0; --bit) {
+            if (state & 0x80)
+                state = (state << 1) ^ 0x63;
+            else
+                state = (state << 1);
+        }
+    }
+    return state;
+}
+
 
 uint16_t LegicPrimeAppProcess(uint8_t *Buffer, uint16_t BitCount) {
 
@@ -114,6 +138,8 @@ void LegicPrimeGetUid(ConfigurationUidType Uid) {
 void LegicPrimeSetUid(ConfigurationUidType Uid) {
     sprintf(legic_log_str, "LEGIC SET UID");
     MemoryWriteBlock(Uid, MEM_UID_ADDRESS, LEGIC_PRIME_UID_SIZE);
+    uint8_t storage_crc = calculateStorageCRC(Uid, 4);
+    MemoryWriteBlock(&storage_crc, MEM_UID_CRC_ADDRESS, 1);
     //TODO: Write also the LEGIC prime UID CRC to MEM_UID_CRC_ADDRESS
     LogEntry(LOG_INFO_GENERIC, legic_log_str, strlen(legic_log_str));
 }
@@ -122,13 +148,9 @@ void LegicPrimeAppInit(void) {
     response_index = 0;
     sprintf(legic_log_str, "LEGIC APP INIT");
     LogEntry(LOG_INFO_GENERIC, legic_log_str, strlen(legic_log_str));
-
-    uint8_t card_memory[] = {0x81, 0xAB, 0xB8, 0x4A, 0xA7};
-    MemoryWriteBlock(card_memory, MEM_UID_ADDRESS, 5);
-
 }
 
 void LegicPrimeAppReset(void) {
     response_index = 0;
 }
-//#endif
+#endif
