@@ -32,7 +32,6 @@ char legic_log_str[64];
  * 0x00 0x00 [2 bytes]
  * additional segments
  * */
-uint8_t response_index;
 
 /*
  * Calculate transport CRC for LEGIC prime
@@ -123,27 +122,19 @@ uint16_t LegicPrimeAppProcess(uint8_t *Buffer, uint16_t BitCount) {
     }
 }
 
-void LegicPrimeGetUid(ConfigurationUidType Uid) {
-    sprintf(legic_log_str, "LEGIC GET UID");
-    LogEntry(LOG_INFO_GENERIC, legic_log_str, strlen(legic_log_str));
-    MemoryReadBlock(Uid, MEM_UID_ADDRESS, LEGIC_PRIME_UID_SIZE);
+void LegicPrimeGetUid(ConfigurationUidType uid) {
+    MemoryReadBlock(uid, MEM_UID_ADDRESS, LEGIC_PRIME_UID_SIZE);
 }
 
-void LegicPrimeSetUid(ConfigurationUidType Uid) {
-    sprintf(legic_log_str, "LEGIC SET UID");
-    MemoryWriteBlock(Uid, MEM_UID_ADDRESS, LEGIC_PRIME_UID_SIZE);
-    uint8_t storage_crc = calculateStorageCRC(Uid, 4);
+void LegicPrimeSetUid(ConfigurationUidType uid) {
+    MemoryWriteBlock(uid, MEM_UID_ADDRESS, LEGIC_PRIME_UID_SIZE);
+    uint8_t storage_crc = calculateStorageCRC(uid, 4);
     MemoryWriteBlock(&storage_crc, MEM_UID_CRC_ADDRESS, 1);
-    LogEntry(LOG_INFO_GENERIC, legic_log_str, strlen(legic_log_str));
 }
 
 void LegicPrimeAppInit(void) {
-    response_index = 0;
-    sprintf(legic_log_str, "LEGIC APP INIT");
-    LogEntry(LOG_INFO_GENERIC, legic_log_str, strlen(legic_log_str));
 }
 
 void LegicPrimeAppReset(void) {
-    response_index = 0;
 }
 #endif
