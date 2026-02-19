@@ -36,21 +36,6 @@ char legic_log_str[64];
  * */
 uint8_t response_index;
 
-uint8_t calculateTransportCRC(uint8_t data){
-    switch(data){
-        case 0x81:
-            return 0xA;
-        case 0xAB:
-            return 0x1;
-        case 0xB8:
-            return 0x8;
-        case 0x4A:
-            return 0xE;
-        case 0xA7:
-            return 0x0;
-        default:
-            return 0xF;
-    }
 /*
  * Calculate transport CRC for LEGIC prime
  *
