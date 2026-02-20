@@ -20,6 +20,7 @@ void LegicPrimeAppInit256(void);
 void LegicPrimeAppInit1024(void);
 
 uint16_t LegicPrimeAppProcess(uint8_t *Buffer, uint16_t BitCount);
+void LegicPrimeAppReset(void);
 
 void LegicPrimeGetUid(ConfigurationUidType Uid);
 void LegicPrimeSetUid(ConfigurationUidType Uid);

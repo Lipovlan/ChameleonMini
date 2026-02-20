@@ -9,8 +9,6 @@
 
 #include "LegicPrime.h"
 
-char legic_log_str[64];
-static uint8_t legic_iv_ack;
 #include "../Codec/ISO14443-2F.h"
 #include "../Memory.h"
 
@@ -24,6 +22,15 @@ static uint8_t legic_iv_ack;
 #define MEM_DCF_HIGH_ADDRESS    0x06
 #define MEM_BACKUP_ADDRESS      0x0D
 #define MEM_BACKUP_CRC_ADDRESS  0x13
+
+char legic_log_str[64];
+static uint8_t legic_iv_ack;
+uint8_t application_state;
+
+typedef enum {
+    SETUP_PHASE,
+    MAIN_PHASE,
+} ApplicationStateType;
 
 /* LEGIC prime card layout
  * UID [4 Bytes]
@@ -81,6 +88,29 @@ uint32_t calculateStorageCRC(uint8_t *buff, size_t size) {
     return state;
 }
 
+void calculateReadResponse(uint8_t *Buffer, uint16_t BitCount ){
+    /* Retrieve the data from memory and calculate the CRC */
+    long int data = 0;
+    uint16_t address = 0;
+    switch(BitCount){
+        case 6:
+            address = ExtractByteFromPositionInBuffer(Buffer, 1) & 0x1F; //Read only 5 bits
+            break;
+        case 9:
+            address = ExtractByteFromPositionInBuffer(Buffer, 1) & 0xFF; //Read only 8 bits
+            break;
+        case 11:
+            address = (ExtractByteFromPositionInBuffer(Buffer, 9) << 8 | ExtractByteFromPositionInBuffer(Buffer, 1)) & 0x3FF; // Read only 10 bits
+            break;
+    }
+    MemoryReadBlock(&data, MEM_UID_ADDRESS + address, 1);
+    long int crc_input = (data << BitCount) | address << 1 | 0x1;
+
+    /* Now put the data into the shared buffer and send them back to Codec */
+    Buffer[0] = data;
+    Buffer[1] = calculateTransportCRC(crc_input, BitCount + 8);
+}
+
 
 uint16_t LegicPrimeAppProcess(uint8_t *Buffer, uint16_t BitCount) {
     switch(BitCount){
@@ -89,48 +119,32 @@ uint16_t LegicPrimeAppProcess(uint8_t *Buffer, uint16_t BitCount) {
         case 7:
             // Probably start of setup phase
             //Type frame
+            application_state = SETUP_PHASE;
             Buffer[0] = legic_iv_ack;
             return 6;
         case 6:
             // Probably end of setup phase
-            return ISO14443F_APP_NO_RESPONSE;
+            if (application_state == SETUP_PHASE) {
+                application_state = MAIN_PHASE;
+                return ISO14443F_APP_NO_RESPONSE;
+            } else {
+                // Probably reading MIM22 card
+                if (GetBitOnPositionInBuffer(Buffer, 0)) {
+                    calculateReadResponse(Buffer, BitCount);
+                    return 12;
+                } else {
+                    //Write command
+                    //TODO: Implement
+                    return ISO14443F_APP_NO_RESPONSE;
+                }
+            }
         case 9:
             // Probably reading MIM256 card
-            if (GetBitOnPositionInBuffer(Buffer, 0)){
-                //Read command
-                /* Retrieve the data from memory and calculate the CRC */
-                long int data = 0;
-                uint8_t address = ExtractByteFromPositionInBuffer(Buffer, 1);
-                MemoryReadBlock(&data, MEM_UID_ADDRESS + address, 1);
-                long int crc_input = (data << 9) | address << 1 | 0x1;
-
-
-                /* Now put the data into the shared buffer and send them back to Codec */
-                Buffer[0] = data;
-                Buffer[1] = calculateTransportCRC(crc_input, 17);
-
-                return 12;
-            } else {
-                //Write command
-                //TODO: Implement
-                return ISO14443F_APP_NO_RESPONSE;
-            }
-            // Fallthrough to case 11
+            // Fallthrough to case of MIM1024
         case 11:
             // Probably reading MIM1024 card
             if (GetBitOnPositionInBuffer(Buffer, 0)){
-                /* Retrieve the data from memory and calculate the CRC */
-                long int data = 0;
-                uint16_t address = (ExtractByteFromPositionInBuffer(Buffer, 9) << 8 | ExtractByteFromPositionInBuffer(Buffer, 1)) & 0x3FF;
-
-                MemoryReadBlock(&data, MEM_UID_ADDRESS + address, 1);
-                long int crc_input = (data << 11) | address << 1 | 0x1;
-//                sprintf(legic_log_str, "crc input is %lx ", crc_input);
-//                LogEntry(LOG_INFO_GENERIC, legic_log_str, strlen(legic_log_str));
-
-                /* Now put the data into the shared buffer and send them back to Codec */
-                Buffer[0] = data;
-                Buffer[1] = calculateTransportCRC(crc_input, 19);
+                calculateReadResponse(Buffer, BitCount);
                 return 12;
             } else {
                 //Write command
@@ -156,14 +170,21 @@ void LegicPrimeSetUid(ConfigurationUidType uid) {
 
 void LegicPrimeAppInit22(void) {
     legic_iv_ack = LEGIC_PRIME_22_IV_ACK;
+    application_state = SETUP_PHASE;
 }
 
 void LegicPrimeAppInit256(void) {
     legic_iv_ack = LEGIC_PRIME_256_IV_ACK;
+    application_state = SETUP_PHASE;
 }
 
 void LegicPrimeAppInit1024(void) {
     legic_iv_ack = LEGIC_PRIME_1024_IV_ACK;
+    application_state = SETUP_PHASE;
 }
 
 #endif
+void LegicPrimeAppReset(void) {
+    application_state = SETUP_PHASE;
+}
+

@@ -21,6 +21,7 @@
 static const MapEntryType PROGMEM ConfigurationMap[] = {
     { .Id = CONFIG_NONE, 			        .Text = "NONE" },
 #ifdef CONFIG_LEGIC_PRIME_SUPPORT
+    { .Id = CONFIG_LEGIC_PRIME_22, 	                 .Text = "LEGIC_PRIME_22" },
     { .Id = CONFIG_LEGIC_PRIME_256, 	             .Text = "LEGIC_PRIME_256" },
     { .Id = CONFIG_LEGIC_PRIME_1024, 	             .Text = "LEGIC_PRIME_1024" },
 #endif
@@ -114,13 +115,30 @@ static const PROGMEM ConfigurationType ConfigurationTable[] = {
         .TagFamily = TAG_FAMILY_NONE
     },
 #ifdef CONFIG_LEGIC_PRIME_SUPPORT
+    [CONFIG_LEGIC_PRIME_22] = {
+            .CodecInitFunc = ISO14443FCodecInit,
+            .CodecDeInitFunc = ISO14443FCodecDeInit,
+            .CodecTaskFunc = ISO14443FCodecTask,
+            .ApplicationInitFunc = LegicPrimeAppInit22,
+            .ApplicationInitRunOnceFunc = LegicPrimeAppInit22,
+            .ApplicationResetFunc = LegicPrimeAppReset,
+            .ApplicationTaskFunc = ApplicationTaskDummy,
+            .ApplicationTickFunc = ApplicationTickDummy,
+            .ApplicationProcessFunc = LegicPrimeAppProcess,
+            .ApplicationGetUidFunc = LegicPrimeGetUid,
+            .ApplicationSetUidFunc = LegicPrimeSetUid,
+            .UidSize = LEGIC_PRIME_UID_SIZE,
+            .MemorySize = LEGIC_PRIME_22_MEM_SIZE,
+            .ReadOnly = false,
+            .TagFamily = TAG_FAMILY_ISO14443F
+    },
     [CONFIG_LEGIC_PRIME_256] = {
             .CodecInitFunc = ISO14443FCodecInit,
             .CodecDeInitFunc = ISO14443FCodecDeInit,
             .CodecTaskFunc = ISO14443FCodecTask,
             .ApplicationInitFunc = LegicPrimeAppInit256,
             .ApplicationInitRunOnceFunc = LegicPrimeAppInit256,
-            .ApplicationResetFunc = ApplicationResetDummy,
+            .ApplicationResetFunc = LegicPrimeAppReset,
             .ApplicationTaskFunc = ApplicationTaskDummy,
             .ApplicationTickFunc = ApplicationTickDummy,
             .ApplicationProcessFunc = LegicPrimeAppProcess,
@@ -137,7 +155,7 @@ static const PROGMEM ConfigurationType ConfigurationTable[] = {
             .CodecTaskFunc = ISO14443FCodecTask,
             .ApplicationInitFunc = LegicPrimeAppInit1024,
             .ApplicationInitRunOnceFunc = LegicPrimeAppInit1024,
-            .ApplicationResetFunc = ApplicationResetDummy,
+            .ApplicationResetFunc = LegicPrimeAppReset,
             .ApplicationTaskFunc = ApplicationTaskDummy,
             .ApplicationTickFunc = ApplicationTickDummy,
             .ApplicationProcessFunc = LegicPrimeAppProcess,
